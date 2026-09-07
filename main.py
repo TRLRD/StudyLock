@@ -14,8 +14,10 @@ from PySide6.QtWidgets import (
     QApplication, QComboBox, QFileDialog, QFormLayout, QHBoxLayout, QLabel,
     QLineEdit, QListWidget, QMainWindow, QMessageBox, QPushButton, QSpinBox,
     QVBoxLayout, QWidget, QDialog, QDialogButtonBox, QTableWidget,
-    QTableWidgetItem, QTabWidget, QCheckBox
+    QTableWidgetItem, QTabWidget
 )
+
+from curriculum import available_curricula, get_curriculum, subjects_for, stages_for
 
 APP_NAME = "StudyLock"
 DATA_DIR = Path(os.getenv("APPDATA", Path.home())) / "StudyLock"
@@ -26,17 +28,29 @@ SETTINGS_FILE = DATA_DIR / "settings.json"
 
 DEFAULT_QUESTIONS = {
     "Chemistry": [
-        {"question": "What is the charge of a proton?", "answers": ["+1", "positive one", "1"], "topic": "Atomic structure"},
-        {"question": "What is the chemical symbol for sodium?", "answers": ["Na"], "topic": "Atomic structure"},
-    ],
-    "Physics": [
-        {"question": "What is the SI unit of force?", "answers": ["N", "newton", "newtons"], "topic": "Forces"},
-        {"question": "What is the approximate acceleration due to gravity on Earth?", "answers": ["9.8", "9.81", "9.8 m/s2", "9.81 m/s2"], "topic": "Forces", "numeric_tolerance": 0.05},
-    ],
-    "Math": [
-        {"question": "What is 12 × 8?", "answers": ["96"], "topic": "Arithmetic"},
-        {"question": "What is the square root of 81?", "answers": ["9"], "topic": "Arithmetic"},
-    ],
+        {
+            "question": "What is the charge of a proton?",
+            "answers": ["+1", "positive one", "1"],
+            "topic": "Atomic structure",
+            "difficulty": "Normal",
+            "curriculum": "gcse",
+            "subject": "Chemistry",
+            "qualification_stage": "O Level",
+            "exam_board": "Sample",
+            "paper_reference": "Sample question",
+        },
+        {
+            "question": "What is the chemical symbol for sodium?",
+            "answers": ["Na"],
+            "topic": "Atomic structure",
+            "difficulty": "Easy",
+            "curriculum": "gcse",
+            "subject": "Chemistry",
+            "qualification_stage": "O Level",
+            "exam_board": "Sample",
+            "paper_reference": "Sample question",
+        },
+    ]
 }
 
 
@@ -53,7 +67,7 @@ def default_stats() -> dict:
 def load_json(path: Path, fallback: Any) -> Any:
     try:
         if not path.exists():
-            path.write_text(json.dumps(fallback, indent=2, ensure_ascii=False), encoding="utf-8")
+            atomic_save_json(path, fallback)
             return fallback
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
@@ -82,9 +96,18 @@ def validate_question_sets(data: Any) -> dict:
             answers = item.get("answers")
             if not isinstance(answers, list) or not answers:
                 raise ValueError(f"Question '{item.get('question', '')}' needs at least one answer.")
+            curriculum = str(item.get("curriculum") or "gcse").strip().lower()
+            subject_name = str(item.get("subject") or subject).strip()
+            stage = str(item.get("qualification_stage") or "O Level").strip()
+            if not get_curriculum(curriculum):
+                raise ValueError(f"Unknown curriculum '{curriculum}' in '{item.get('question', '')}'.")
+            if subject_name not in subjects_for(curriculum):
+                raise ValueError(f"Subject '{subject_name}' is not available for curriculum '{curriculum}'.")
+            if stage not in stages_for(curriculum):
+                raise ValueError(f"Unknown qualification stage '{stage}' for curriculum '{curriculum}'.")
             tolerance = item.get("numeric_tolerance", 0)
             try:
-                tolerance = float(tolerance)
+                tolerance = max(0.0, float(tolerance))
             except (ValueError, TypeError):
                 raise ValueError(f"Invalid numeric_tolerance in '{item.get('question', '')}'.")
             choices = item.get("choices", [])
@@ -96,7 +119,12 @@ def validate_question_sets(data: Any) -> dict:
                 "topic": str(item.get("topic") or "General"),
                 "choices": [str(x) for x in choices],
                 "difficulty": str(item.get("difficulty") or "Normal"),
-                "numeric_tolerance": max(0.0, tolerance),
+                "numeric_tolerance": tolerance,
+                "curriculum": curriculum,
+                "subject": subject_name,
+                "qualification_stage": stage,
+                "exam_board": str(item.get("exam_board") or ""),
+                "paper_reference": str(item.get("paper_reference") or ""),
             })
         cleaned[subject.strip()] = cleaned_items
     return cleaned
@@ -107,7 +135,6 @@ def load_questions() -> dict:
     try:
         return validate_question_sets(data)
     except ValueError:
-        # Preserve a usable app if a hand-edited file is malformed.
         backup = QUESTIONS_FILE.with_name("questions.invalid.json")
         try:
             QUESTIONS_FILE.replace(backup)
@@ -161,23 +188,23 @@ def list_windows_processes() -> list[tuple[str, int, str]]:
     return sorted(result, key=lambda x: normalize(x[0]))
 
 
-def foreground_process() -> psutil.Process | None:
+def foreground_window() -> tuple[psutil.Process | None, int]:
     if sys.platform != "win32":
-        return None
+        return None, 0
     try:
         import ctypes
-        hwnd = ctypes.windll.user32.GetForegroundWindow()
+        hwnd = int(ctypes.windll.user32.GetForegroundWindow())
         if not hwnd:
-            return None
+            return None, 0
         pid = ctypes.c_ulong()
         ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
-        return psutil.Process(pid.value)
+        return psutil.Process(pid.value), hwnd
     except Exception:
-        return None
+        return None, 0
 
 
 def is_target_foreground(target_exe: str, target_pid: int | None = None) -> bool:
-    proc = foreground_process()
+    proc, _ = foreground_window()
     if not proc:
         return False
     try:
@@ -188,19 +215,33 @@ def is_target_foreground(target_exe: str, target_pid: int | None = None) -> bool
         return False
 
 
+def target_window_rect(target_exe: str, target_pid: int | None = None) -> QRect | None:
+    proc, hwnd = foreground_window()
+    if not proc or not hwnd or not is_target_foreground(target_exe, target_pid):
+        return None
+    try:
+        import ctypes
+        class RECT(ctypes.Structure):
+            _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long), ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+        rect = RECT()
+        if not ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+            return None
+        width = rect.right - rect.left
+        height = rect.bottom - rect.top
+        if width <= 0 or height <= 0:
+            return None
+        return QRect(rect.left, rect.top, width, height)
+    except Exception:
+        return None
+
+
 def set_windows_topmost(hwnd: int, topmost: bool) -> None:
     if sys.platform != "win32":
         return
     try:
         import ctypes
         user32 = ctypes.windll.user32
-        HWND_TOPMOST = -1
-        HWND_NOTOPMOST = -2
-        SWP_NOMOVE = 0x0002
-        SWP_NOSIZE = 0x0001
-        SWP_SHOWWINDOW = 0x0040
-        user32.SetWindowPos(hwnd, HWND_TOPMOST if topmost else HWND_NOTOPMOST, 0, 0, 0, 0,
-                            SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW)
+        user32.SetWindowPos(hwnd, -1 if topmost else -2, 0, 0, 0, 0, 0x0002 | 0x0001 | 0x0040)
     except Exception:
         pass
 
@@ -212,7 +253,7 @@ class GamePickerDialog(QDialog):
         self.resize(760, 540)
         self.selected = None
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Select the running game. StudyLock will monitor only this application's foreground window."))
+        layout.addWidget(QLabel("Select the running game. StudyLock monitors only this application's foreground window."))
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search processes…")
         layout.addWidget(self.search)
@@ -272,12 +313,13 @@ class GamePickerDialog(QDialog):
 
 
 class QuestionOverlay(QWidget):
-    """External overlay. It never injects into, modifies, or sends input to the game."""
-    def __init__(self, question, answer_callback, target_check):
+    """External overlay positioned over the selected game's window only."""
+    def __init__(self, question, answer_callback, target_check, rect_callback):
         super().__init__()
         self.question = question
         self.answer_callback = answer_callback
         self.target_check = target_check
+        self.rect_callback = rect_callback
         self.allow_close = False
         self.started_at = time.monotonic()
         self.wrong_attempts = 0
@@ -287,66 +329,62 @@ class QuestionOverlay(QWidget):
         self.setStyleSheet("background:#101114; color:white;")
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(90, 70, 90, 70)
-        root.setSpacing(22)
+        root.setContentsMargins(70, 50, 70, 50)
+        root.setSpacing(18)
         title = QLabel("STUDYLOCK")
         title.setFont(QFont("Segoe UI", 22, QFont.Weight.Bold))
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         root.addWidget(title)
-        topic = QLabel(f"{question.get('topic', 'General')} • {question.get('difficulty', 'Normal')}")
+        metadata = question.get("topic", "General")
+        if question.get("exam_board"):
+            metadata += f" • {question['exam_board']}"
+        metadata += f" • {question.get('difficulty', 'Normal')}"
+        topic = QLabel(metadata)
         topic.setAlignment(Qt.AlignmentFlag.AlignCenter)
         topic.setStyleSheet("color:#9aa0aa;")
         root.addWidget(topic)
         q = QLabel(question["question"])
         q.setWordWrap(True)
         q.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        q.setFont(QFont("Segoe UI", 30, QFont.Weight.DemiBold))
+        q.setFont(QFont("Segoe UI", 26, QFont.Weight.DemiBold))
         root.addWidget(q, 1)
-
         choices = question.get("choices", [])
         if choices:
             for choice in choices:
                 btn = QPushButton(choice)
-                btn.setFont(QFont("Segoe UI", 16))
+                btn.setFont(QFont("Segoe UI", 15))
                 btn.clicked.connect(lambda checked=False, c=choice: self.submit(c))
                 root.addWidget(btn)
         else:
             self.answer = QLineEdit()
             self.answer.setPlaceholderText("Type your answer…")
-            self.answer.setFont(QFont("Segoe UI", 22))
+            self.answer.setFont(QFont("Segoe UI", 20))
             self.answer.returnPressed.connect(lambda: self.submit(self.answer.text()))
-            self.answer.setStyleSheet("padding:16px; border-radius:10px; background:#202329; color:white;")
+            self.answer.setStyleSheet("padding:14px; border-radius:10px; background:#202329; color:white;")
             root.addWidget(self.answer)
-            self.answer.setFocus()
             button = QPushButton("CHECK ANSWER")
-            button.setFont(QFont("Segoe UI", 16, QFont.Weight.Bold))
+            button.setFont(QFont("Segoe UI", 15, QFont.Weight.Bold))
             button.clicked.connect(lambda: self.submit(self.answer.text()))
             root.addWidget(button)
-
         self.feedback = QLabel("")
         self.feedback.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.feedback.setFont(QFont("Segoe UI", 16))
+        self.feedback.setFont(QFont("Segoe UI", 15))
         root.addWidget(self.feedback)
-
         self.watchdog = QTimer(self)
         self.watchdog.timeout.connect(self.watch_target)
         self.watchdog.start(150)
 
     def showEvent(self, event):
         super().showEvent(event)
-        self.cover_virtual_desktop()
+        self.update_to_target()
         self.force_foreground()
         if hasattr(self, "answer"):
             self.answer.setFocus()
 
-    def cover_virtual_desktop(self):
-        screens = QApplication.screens()
-        if not screens:
-            return
-        rect = QRect()
-        for screen in screens:
-            rect = screen.geometry() if rect.isNull() else rect.united(screen.geometry())
-        self.setGeometry(rect)
+    def update_to_target(self):
+        rect = self.rect_callback()
+        if rect and rect.width() > 0 and rect.height() > 0:
+            self.setGeometry(rect)
 
     def force_foreground(self):
         try:
@@ -359,18 +397,18 @@ class QuestionOverlay(QWidget):
             pass
 
     def watch_target(self):
-        # Leaving the selected game is explicitly allowed for emergencies.
-        # The pending question is retained and reappears when the user returns.
         try:
-            target_active = bool(self.target_check())
+            active = bool(self.target_check())
         except Exception:
-            target_active = False
-        if not target_active and self.isVisible():
-            self.hide()
-        elif target_active and not self.isVisible():
+            active = False
+        if not active:
+            if self.isVisible():
+                self.hide()
+            return
+        self.update_to_target()
+        if not self.isVisible():
             self.show()
-            self.cover_virtual_desktop()
-            self.force_foreground()
+        self.force_foreground()
 
     def submit(self, value: str):
         elapsed = max(0.05, time.monotonic() - self.started_at)
@@ -398,11 +436,11 @@ class AnalyticsDialog(QDialog):
     def __init__(self, stats, parent=None):
         super().__init__(parent)
         self.setWindowTitle("StudyLock — Topic Performance")
-        self.resize(1000, 600)
+        self.resize(1050, 620)
         root = QVBoxLayout(self)
-        root.addWidget(QLabel("Mastery uses accuracy as the main signal, then uses answer speed and wrong-attempt rate to identify weak points. A fast but inaccurate topic is still weak."))
-        table = QTableWidget(0, 8)
-        table.setHorizontalHeaderLabels(["Subject", "Topic", "Questions", "Accuracy", "Avg speed", "Wrong attempts", "Mastery", "Recommendation"])
+        root.addWidget(QLabel("Accuracy is the main signal. Speed and wrong attempts help identify weak points; being fast but inaccurate is still weak."))
+        table = QTableWidget(0, 9)
+        table.setHorizontalHeaderLabels(["Curriculum", "Subject", "Stage", "Topic", "Answered", "Accuracy", "Avg speed", "Mastery", "Recommendation"])
         table.horizontalHeader().setStretchLastSection(True)
         root.addWidget(table)
         rows = []
@@ -423,12 +461,12 @@ class AnalyticsDialog(QDialog):
                 rec = "Needs practice"
             else:
                 rec = "Weak point — prioritize practice"
-            rows.append((mastery, str(s.get("subject", "")), str(s.get("topic", key)), answered, accuracy, avg, wrong, rec))
+            rows.append((mastery, s, answered, accuracy, avg, rec))
         rows.sort(key=lambda x: x[0])
-        for mastery, subject, topic, answered, accuracy, avg, wrong, rec in rows:
+        for mastery, s, answered, accuracy, avg, rec in rows:
             row = table.rowCount()
             table.insertRow(row)
-            values = [subject, topic, str(answered), f"{accuracy:.0f}%", f"{avg:.1f}s", str(wrong), f"{mastery:.0f}/100", rec]
+            values = [str(s.get("curriculum", "")), str(s.get("subject", "")), str(s.get("qualification_stage", "")), str(s.get("topic", key)), str(answered), f"{accuracy:.0f}%", f"{avg:.1f}s", f"{mastery:.0f}/100", rec]
             for col, value in enumerate(values):
                 table.setItem(row, col, QTableWidgetItem(value))
         if not rows:
@@ -464,30 +502,41 @@ class StudyLock(QMainWindow):
         self.resize(980, 720)
         tabs = QTabWidget()
         self.setCentralWidget(tabs)
-
         home = QWidget()
         root = QVBoxLayout(home)
         root.setContentsMargins(35, 30, 35, 30)
-        root.setSpacing(16)
+        root.setSpacing(15)
         title = QLabel("StudyLock")
         title.setFont(QFont("Segoe UI", 34, QFont.Weight.Bold))
         root.addWidget(title)
-        root.addWidget(QLabel("Study first. Earn your game time — without modifying the game."))
+        root.addWidget(QLabel("StudyLock asks questions from the exact curriculum / subject / qualification you select."))
 
         form = QFormLayout()
+        self.curriculum = QComboBox()
+        for item in available_curricula():
+            self.curriculum.addItem(item.name, item.id)
         self.subject = QComboBox()
-        self.subject.addItems(sorted(self.questions.keys()))
+        self.stage = QComboBox()
+        self.curriculum.currentIndexChanged.connect(self.curriculum_changed)
+        self.subject.currentIndexChanged.connect(self.selection_changed)
+        self.stage.currentIndexChanged.connect(self.selection_changed)
+        form.addRow("Curriculum", self.curriculum)
+        form.addRow("Subject", self.subject)
+        form.addRow("Qualification", self.stage)
         self.interval = QSpinBox()
         self.interval.setRange(1, 180)
         self.interval.setValue(int(self.settings.get("interval_minutes", 20)))
         self.interval.setSuffix(" min")
-        form.addRow("Question set", self.subject)
         form.addRow("Question every", self.interval)
         root.addLayout(form)
 
+        self.course_status = QLabel()
+        self.course_status.setWordWrap(True)
+        root.addWidget(self.course_status)
+        self.curriculum_changed()
+
         game_row = QHBoxLayout()
-        self.game_label = QLabel()
-        self.game_label.setText(self.target_display or "No game selected")
+        self.game_label = QLabel(self.target_display or "No game selected")
         self.game_label.setWordWrap(True)
         select_game = QPushButton("Select game…")
         select_game.clicked.connect(self.select_game)
@@ -497,9 +546,9 @@ class StudyLock(QMainWindow):
         game_row.addWidget(select_game)
         game_row.addWidget(clear_game)
         root.addLayout(game_row)
-        lock_note = QLabel("🔒 Only the selected game is subject to the StudyLock question. Chrome, Google, Discord and other apps remain available.")
-        lock_note.setWordWrap(True)
-        root.addWidget(lock_note)
+        note = QLabel("🔒 Only the selected game is subject to StudyLock. Alt+Tab to Chrome, Google, Discord or another app whenever needed. The pending question returns when you return to the game.")
+        note.setWordWrap(True)
+        root.addWidget(note)
 
         buttons = QHBoxLayout()
         start = QPushButton("▶ Start StudyLock")
@@ -522,24 +571,67 @@ class StudyLock(QMainWindow):
         self.status = QLabel("Ready")
         self.status.setFont(QFont("Segoe UI", 18, QFont.Weight.DemiBold))
         root.addWidget(self.status)
-        self.details = QLabel("Select a game, choose a question set, and start. Leaving the selected game for an emergency is allowed; the pending question returns when you return to the game.")
+        self.details = QLabel("Choose a curriculum, subject and qualification, select a game, then start.")
         self.details.setWordWrap(True)
         root.addWidget(self.details)
         root.addStretch()
 
         sets = QWidget()
         sets_root = QVBoxLayout(sets)
-        sets_root.addWidget(QLabel("Question sets"))
+        sets_root.addWidget(QLabel("Loaded question bank"))
         self.list_widget = QListWidget()
         sets_root.addWidget(self.list_widget)
         self.refresh_subjects()
         tabs.addTab(home, "Session")
-        tabs.addTab(sets, "Question Sets")
+        tabs.addTab(sets, "Question Bank")
+
+    def current_selection(self):
+        return (
+            str(self.curriculum.currentData() or "").strip().lower(),
+            self.subject.currentText().strip(),
+            self.stage.currentText().strip(),
+        )
+
+    def curriculum_changed(self):
+        curriculum_id = str(self.curriculum.currentData() or "")
+        self.subject.blockSignals(True)
+        self.stage.blockSignals(True)
+        self.subject.clear()
+        self.subject.addItems(subjects_for(curriculum_id))
+        self.stage.clear()
+        self.stage.addItems(stages_for(curriculum_id))
+        saved = self.settings.get("subject")
+        if saved in subjects_for(curriculum_id):
+            self.subject.setCurrentText(saved)
+        saved_stage = self.settings.get("qualification_stage")
+        if saved_stage in stages_for(curriculum_id):
+            self.stage.setCurrentText(saved_stage)
+        self.subject.blockSignals(False)
+        self.stage.blockSignals(False)
+        self.selection_changed()
+
+    def selection_changed(self):
+        curriculum_id, subject, stage = self.current_selection()
+        count = len(self.filtered_questions()) if hasattr(self, "questions") else 0
+        curriculum = get_curriculum(curriculum_id)
+        name = curriculum.name if curriculum else curriculum_id
+        self.course_status.setText(f"Course: {name} → {subject} → {stage} | {count} matching questions loaded")
+        if hasattr(self, "settings"):
+            self.settings.update({"curriculum": curriculum_id, "subject": subject, "qualification_stage": stage})
+            atomic_save_json(SETTINGS_FILE, self.settings)
+
+    def filtered_questions(self):
+        curriculum_id, subject, stage = self.current_selection()
+        pool = self.questions.get(subject, [])
+        return [q for q in pool if q.get("curriculum") == curriculum_id and q.get("subject") == subject and q.get("qualification_stage") == stage]
 
     def refresh_subjects(self):
         self.list_widget.clear()
-        for name, items in self.questions.items():
-            self.list_widget.addItem(f"{name} — {len(items)} questions")
+        for curriculum in available_curricula():
+            for subject in curriculum.subjects:
+                for stage in curriculum.qualification_stages:
+                    count = sum(1 for q in self.questions.get(subject, []) if q.get("curriculum") == curriculum.id and q.get("qualification_stage") == stage)
+                    self.list_widget.addItem(f"{curriculum.name} → {subject} → {stage}: {count} questions")
 
     def select_game(self):
         dialog = GamePickerDialog(self, self.target_exe)
@@ -556,18 +648,20 @@ class StudyLock(QMainWindow):
         self.target_pid = None
         self.target_display = ""
         self.game_label.setText("No game selected — select one before starting")
-        self.settings.pop("target_exe", None)
-        self.settings.pop("target_pid", None)
-        self.settings.pop("target_display", None)
+        for key in ("target_exe", "target_pid", "target_display"):
+            self.settings.pop(key, None)
         atomic_save_json(SETTINGS_FILE, self.settings)
 
     def target_is_foreground(self):
         return bool(self.target_exe) and is_target_foreground(self.target_exe, self.target_pid)
 
+    def target_rect(self):
+        return target_window_rect(self.target_exe, self.target_pid)
+
     def start_lock(self):
-        pool = self.questions.get(self.subject.currentText(), [])
+        pool = self.filtered_questions()
         if not pool:
-            QMessageBox.warning(self, APP_NAME, "This question set has no questions.")
+            QMessageBox.warning(self, APP_NAME, "No questions are loaded for this exact curriculum, subject and qualification. Import the appropriate question bank first.")
             return
         if not self.target_exe:
             QMessageBox.warning(self, APP_NAME, "Select a game first. StudyLock locks the selected game only.")
@@ -582,7 +676,7 @@ class StudyLock(QMainWindow):
         self.settings["interval_minutes"] = self.interval.value()
         atomic_save_json(SETTINGS_FILE, self.settings)
         self.status.setText("RUNNING — game time earned")
-        self.details.setText(f"Watching only: {self.target_display}. Other apps remain available at all times.")
+        self.details.setText(f"Watching only: {self.target_display}. The timer advances only while that selected game is the foreground app.")
 
     def stop_lock(self):
         self.locked = False
@@ -595,7 +689,7 @@ class StudyLock(QMainWindow):
         self.details.setText("Ready")
 
     def choose_question(self):
-        pool = self.questions.get(self.subject.currentText(), [])
+        pool = self.filtered_questions()
         if not pool:
             return None
         candidates = [i for i in range(len(pool)) if i not in self.recent_question_ids]
@@ -619,8 +713,6 @@ class StudyLock(QMainWindow):
                     self.show_question_overlay()
                 elif not self.overlay.isVisible():
                     self.overlay.show()
-                    self.overlay.cover_virtual_desktop()
-                    self.overlay.force_foreground()
                 self.status.setText("LOCKED — answer the question to continue")
             else:
                 self.status.setText("QUESTION WAITING — other apps are available")
@@ -644,41 +736,57 @@ class StudyLock(QMainWindow):
         self.show_question_overlay()
 
     def show_question_overlay(self):
-        if not self.current_question:
+        if not self.current_question or not self.target_is_foreground():
+            return
+        rect = self.target_rect()
+        if not rect:
+            self.status.setText("LOCKED — selected game window cannot be positioned for the external overlay")
+            self.details.setText("If this game uses exclusive fullscreen, switch it to borderless/windowed mode. StudyLock does not inject into or modify the game.")
             return
         if self.overlay is not None:
-            if not self.overlay.isVisible() and self.target_is_foreground():
+            self.overlay.update_to_target()
+            if not self.overlay.isVisible():
                 self.overlay.show()
-                self.overlay.cover_virtual_desktop()
-                self.overlay.force_foreground()
+            self.overlay.force_foreground()
             return
-        self.overlay = QuestionOverlay(self.current_question, self.question_finished, self.target_is_foreground)
+        self.overlay = QuestionOverlay(self.current_question, self.question_finished, self.target_is_foreground, self.target_rect)
+        self.overlay.setGeometry(rect)
         self.overlay.show()
         self.status.setText("LOCKED — answer the question to continue")
 
-    def record_wrong_attempt(self, question):
+    def stats_key(self, question):
+        curriculum_id, subject, stage = self.current_selection()
         topic = str(question.get("topic") or "General")
-        key = f"{self.subject.currentText()}::{topic}"
-        item = self.stats["questions"].setdefault(key, {
-            "subject": self.subject.currentText(), "topic": topic, "answered": 0,
-            "correct": 0, "wrong": 0, "answer_time_total": 0.0,
-            "best_time": None, "recent": []
-        })
-        item["wrong"] += 1
+        return f"{curriculum_id}::{subject}::{stage}::{topic}"
+
+    def make_stat_item(self, question):
+        curriculum_id, subject, stage = self.current_selection()
+        return {
+            "curriculum": curriculum_id,
+            "subject": subject,
+            "qualification_stage": stage,
+            "topic": str(question.get("topic") or "General"),
+            "answered": 0,
+            "correct": 0,
+            "wrong": 0,
+            "answer_time_total": 0.0,
+            "best_time": None,
+            "recent": [],
+        }
+
+    def record_wrong_attempt(self, question):
+        key = self.stats_key(question)
+        item = self.stats["questions"].setdefault(key, self.make_stat_item(question))
+        item["wrong"] = int(item.get("wrong", 0)) + 1
         save_stats(self.stats)
 
     def record_correct(self, question, answer_time, wrong_attempts):
-        topic = str(question.get("topic") or "General")
-        key = f"{self.subject.currentText()}::{topic}"
-        item = self.stats["questions"].setdefault(key, {
-            "subject": self.subject.currentText(), "topic": topic, "answered": 0,
-            "correct": 0, "wrong": 0, "answer_time_total": 0.0,
-            "best_time": None, "recent": []
-        })
-        item["answered"] += 1
-        item["correct"] += 1
-        item["answer_time_total"] += float(answer_time)
-        if item["best_time"] is None or answer_time < float(item["best_time"]):
+        key = self.stats_key(question)
+        item = self.stats["questions"].setdefault(key, self.make_stat_item(question))
+        item["answered"] = int(item.get("answered", 0)) + 1
+        item["correct"] = int(item.get("correct", 0)) + 1
+        item["answer_time_total"] = float(item.get("answer_time_total", 0)) + float(answer_time)
+        if item.get("best_time") is None or answer_time < float(item["best_time"]):
             item["best_time"] = float(answer_time)
         item["recent"] = (item.get("recent", []) + [{"correct": True, "time": answer_time, "wrong_attempts": wrong_attempts}])[-20:]
         self.stats["total_answered"] = int(self.stats.get("total_answered", 0)) + 1
@@ -692,12 +800,15 @@ class StudyLock(QMainWindow):
         normalized = normalize(value)
         accepted = {normalize(x) for x in question.get("answers", [])}
         correct = normalized in accepted
-        if not correct and question.get("numeric_tolerance", 0):
+        tolerance = float(question.get("numeric_tolerance", 0) or 0)
+        if not correct and tolerance:
             try:
                 user_num = float(normalized.replace(",", "."))
                 for answer in accepted:
-                    expected = float(answer.replace(",", ".").replace("m/s2", "").strip())
-                    if math.isclose(user_num, expected, abs_tol=float(question["numeric_tolerance"])):
+                    cleaned = answer.replace(",", ".")
+                    numeric_chars = "0123456789.-+eE"
+                    numeric = "".join(ch for ch in cleaned if ch in numeric_chars)
+                    if numeric and math.isclose(user_num, float(numeric), abs_tol=tolerance):
                         correct = True
                         break
             except (ValueError, TypeError):
@@ -719,27 +830,26 @@ class StudyLock(QMainWindow):
         AnalyticsDialog(self.stats, self).exec()
 
     def import_json(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Import question sets", "", "JSON files (*.json)")
+        path, _ = QFileDialog.getOpenFileName(self, "Import curriculum question bank", "", "JSON files (*.json)")
         if not path:
             return
         try:
             data = validate_question_sets(json.loads(Path(path).read_text(encoding="utf-8")))
             self.questions = data
             save_questions(data)
-            self.subject.clear()
-            self.subject.addItems(sorted(self.questions.keys()))
             self.refresh_subjects()
-            QMessageBox.information(self, APP_NAME, "Question sets imported successfully.")
+            self.selection_changed()
+            QMessageBox.information(self, APP_NAME, "Question bank imported successfully. Questions are filtered by curriculum, subject and qualification.")
         except Exception as exc:
             QMessageBox.critical(self, APP_NAME, f"Could not import questions:\n{exc}")
 
     def export_json(self):
-        path, _ = QFileDialog.getSaveFileName(self, "Export question sets", "StudyLock-questions.json", "JSON files (*.json)")
+        path, _ = QFileDialog.getSaveFileName(self, "Export curriculum question bank", "StudyLock-questions.json", "JSON files (*.json)")
         if not path:
             return
         try:
             Path(path).write_text(json.dumps(self.questions, indent=2, ensure_ascii=False), encoding="utf-8")
-            QMessageBox.information(self, APP_NAME, "Question sets exported successfully.")
+            QMessageBox.information(self, APP_NAME, "Question bank exported successfully.")
         except Exception as exc:
             QMessageBox.critical(self, APP_NAME, f"Could not export questions:\n{exc}")
 
