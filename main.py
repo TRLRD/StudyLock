@@ -2,7 +2,6 @@ import json
 import math
 import os
 import random
-import re
 import sys
 import time
 from pathlib import Path
@@ -32,7 +31,7 @@ DEFAULT_QUESTIONS = {
     ],
     "Physics": [
         {"question": "What is the SI unit of force?", "answers": ["N", "newton", "newtons"], "topic": "Forces"},
-        {"question": "What is the approximate acceleration due to gravity on Earth?", "answers": ["9.8", "9.81", "9.8 m/s2", "9.81 m/s2"], "topic": "Forces"},
+        {"question": "What is the approximate acceleration due to gravity on Earth?", "answers": ["9.8", "9.81", "9.8 m/s2", "9.81 m/s2"], "topic": "Forces", "numeric_tolerance": 0.05},
     ],
     "Math": [
         {"question": "What is 12 × 8?", "answers": ["96"], "topic": "Arithmetic"},
@@ -56,8 +55,7 @@ def load_json(path: Path, fallback: Any) -> Any:
         if not path.exists():
             path.write_text(json.dumps(fallback, indent=2, ensure_ascii=False), encoding="utf-8")
             return fallback
-        value = json.loads(path.read_text(encoding="utf-8"))
-        return value
+        return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return fallback
 
@@ -66,11 +64,6 @@ def atomic_save_json(path: Path, value: Any) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(value, indent=2, ensure_ascii=False), encoding="utf-8")
     tmp.replace(path)
-
-
-def load_questions() -> dict:
-    data = load_json(QUESTIONS_FILE, DEFAULT_QUESTIONS)
-    return validate_question_sets(data)
 
 
 def validate_question_sets(data: Any) -> dict:
@@ -89,20 +82,43 @@ def validate_question_sets(data: Any) -> dict:
             answers = item.get("answers")
             if not isinstance(answers, list) or not answers:
                 raise ValueError(f"Question '{item.get('question', '')}' needs at least one answer.")
+            tolerance = item.get("numeric_tolerance", 0)
+            try:
+                tolerance = float(tolerance)
+            except (ValueError, TypeError):
+                raise ValueError(f"Invalid numeric_tolerance in '{item.get('question', '')}'.")
+            choices = item.get("choices", [])
+            if not isinstance(choices, list):
+                choices = []
             cleaned_items.append({
                 "question": str(item["question"]),
                 "answers": [str(x) for x in answers],
                 "topic": str(item.get("topic") or "General"),
-                "choices": [str(x) for x in item.get("choices", [])] if isinstance(item.get("choices", []), list) else [],
+                "choices": [str(x) for x in choices],
                 "difficulty": str(item.get("difficulty") or "Normal"),
-                "numeric_tolerance": float(item.get("numeric_tolerance", 0)) if item.get("numeric_tolerance") not in (None, "") else 0.0,
+                "numeric_tolerance": max(0.0, tolerance),
             })
         cleaned[subject.strip()] = cleaned_items
     return cleaned
 
 
+def load_questions() -> dict:
+    data = load_json(QUESTIONS_FILE, DEFAULT_QUESTIONS)
+    try:
+        return validate_question_sets(data)
+    except ValueError:
+        # Preserve a usable app if a hand-edited file is malformed.
+        backup = QUESTIONS_FILE.with_name("questions.invalid.json")
+        try:
+            QUESTIONS_FILE.replace(backup)
+        except OSError:
+            pass
+        save_questions(DEFAULT_QUESTIONS)
+        return validate_question_sets(DEFAULT_QUESTIONS)
+
+
 def save_questions(data: dict) -> None:
-    atomic_save_json(QUESTIONS_FILE, data)
+    atomic_save_json(QUESTIONS_FILE, validate_question_sets(data))
 
 
 def load_stats() -> dict:
@@ -126,7 +142,6 @@ def normalize_process_name(name: str) -> str:
 
 
 def list_windows_processes() -> list[tuple[str, int, str]]:
-    """Return (display name, pid, executable name) for visible-ish user processes."""
     result = []
     seen = set()
     for proc in psutil.process_iter(["pid", "name", "exe"]):
@@ -134,7 +149,7 @@ def list_windows_processes() -> list[tuple[str, int, str]]:
             pid = int(proc.info["pid"])
             name = proc.info.get("name") or ""
             exe = Path(proc.info.get("exe") or name).name
-            if pid <= 0 or not name or pid in seen:
+            if pid <= 0 or not name:
                 continue
             key = (normalize_process_name(exe), normalize(name))
             if key in seen:
@@ -158,14 +173,6 @@ def foreground_process() -> psutil.Process | None:
         ctypes.windll.user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
         return psutil.Process(pid.value)
     except Exception:
-        return None
-
-
-def foreground_pid() -> int | None:
-    proc = foreground_process()
-    try:
-        return proc.pid if proc else None
-    except psutil.Error:
         return None
 
 
@@ -202,10 +209,10 @@ class GamePickerDialog(QDialog):
     def __init__(self, parent=None, selected_exe=""):
         super().__init__(parent)
         self.setWindowTitle("Select game")
-        self.resize(720, 520)
+        self.resize(760, 540)
         self.selected = None
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Choose the Windows game/application that StudyLock should lock."))
+        layout.addWidget(QLabel("Select the running game. StudyLock will monitor only this application's foreground window."))
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search processes…")
         layout.addWidget(self.search)
@@ -215,14 +222,14 @@ class GamePickerDialog(QDialog):
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.horizontalHeader().setStretchLastSection(True)
         layout.addWidget(self.table)
-        self.refresh_button = QPushButton("Refresh")
-        self.refresh_button.clicked.connect(self.populate)
+        row = QHBoxLayout()
+        refresh = QPushButton("Refresh")
+        refresh.clicked.connect(self.populate)
+        row.addWidget(refresh)
+        row.addStretch()
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
         buttons.accepted.connect(self.accept_selection)
         buttons.rejected.connect(self.reject)
-        row = QHBoxLayout()
-        row.addWidget(self.refresh_button)
-        row.addStretch()
         row.addWidget(buttons)
         layout.addLayout(row)
         self.search.textChanged.connect(self.populate)
@@ -231,9 +238,8 @@ class GamePickerDialog(QDialog):
 
     def populate(self):
         query = normalize(self.search.text())
-        processes = list_windows_processes()
         self.table.setRowCount(0)
-        for name, pid, exe in processes:
+        for name, pid, exe in list_windows_processes():
             if query and query not in normalize(name) and query not in normalize(exe):
                 continue
             row = self.table.rowCount()
@@ -243,9 +249,9 @@ class GamePickerDialog(QDialog):
             self.table.setItem(row, 2, QTableWidgetItem(exe))
 
     def preselect(self, selected_exe):
-        if not selected_exe:
-            return
         target = normalize_process_name(selected_exe)
+        if not target:
+            return
         for row in range(self.table.rowCount()):
             if normalize_process_name(self.table.item(row, 2).text()) == target:
                 self.table.selectRow(row)
@@ -267,11 +273,11 @@ class GamePickerDialog(QDialog):
 
 class QuestionOverlay(QWidget):
     """External overlay. It never injects into, modifies, or sends input to the game."""
-    def __init__(self, question, answer_callback, leave_callback):
+    def __init__(self, question, answer_callback, target_check):
         super().__init__()
         self.question = question
         self.answer_callback = answer_callback
-        self.leave_callback = leave_callback
+        self.target_check = target_check
         self.allow_close = False
         self.started_at = time.monotonic()
         self.wrong_attempts = 0
@@ -330,6 +336,8 @@ class QuestionOverlay(QWidget):
         super().showEvent(event)
         self.cover_virtual_desktop()
         self.force_foreground()
+        if hasattr(self, "answer"):
+            self.answer.setFocus()
 
     def cover_virtual_desktop(self):
         screens = QApplication.screens()
@@ -351,31 +359,23 @@ class QuestionOverlay(QWidget):
             pass
 
     def watch_target(self):
-        # Emergency behavior: leaving the selected game is allowed. The overlay hides,
-        # but the game remains locked because the question is still pending. Returning
-        # to the selected game immediately restores the question.
-        proc = foreground_process()
-        if proc is None:
-            return
+        # Leaving the selected game is explicitly allowed for emergencies.
+        # The pending question is retained and reappears when the user returns.
         try:
-            # The target is supplied by the controller; callback decides whether the
-            # current foreground app is still the selected game.
-            if not self.is_target_foreground():
-                self.hide()
-                self.leave_callback()
-            elif not self.isVisible():
-                self.show()
-                self.cover_virtual_desktop()
-                self.force_foreground()
+            target_active = bool(self.target_check())
         except Exception:
-            pass
-
-    def is_target_foreground(self):
-        return self.leave_callback.__self__.target_is_foreground() if hasattr(self.leave_callback, "__self__") else True
+            target_active = False
+        if not target_active and self.isVisible():
+            self.hide()
+        elif target_active and not self.isVisible():
+            self.show()
+            self.cover_virtual_desktop()
+            self.force_foreground()
 
     def submit(self, value: str):
         elapsed = max(0.05, time.monotonic() - self.started_at)
-        if self.answer_callback(value, elapsed, self.wrong_attempts):
+        correct = self.answer_callback(value, elapsed, self.wrong_attempts)
+        if correct:
             self.allow_close = True
             self.close()
         else:
@@ -398,24 +398,23 @@ class AnalyticsDialog(QDialog):
     def __init__(self, stats, parent=None):
         super().__init__(parent)
         self.setWindowTitle("StudyLock — Topic Performance")
-        self.resize(900, 560)
+        self.resize(1000, 600)
         root = QVBoxLayout(self)
-        root.addWidget(QLabel("Your weak points are based on accuracy, answer speed, wrong attempts, and recent performance. Speed is never used to excuse incorrect answers."))
-        table = QTableWidget(0, 7)
-        table.setHorizontalHeaderLabels(["Topic", "Questions", "Accuracy", "Avg speed", "Wrong attempts", "Mastery", "Recommendation"])
+        root.addWidget(QLabel("Mastery uses accuracy as the main signal, then uses answer speed and wrong-attempt rate to identify weak points. A fast but inaccurate topic is still weak."))
+        table = QTableWidget(0, 8)
+        table.setHorizontalHeaderLabels(["Subject", "Topic", "Questions", "Accuracy", "Avg speed", "Wrong attempts", "Mastery", "Recommendation"])
         table.horizontalHeader().setStretchLastSection(True)
         root.addWidget(table)
         rows = []
-        for topic, s in stats.get("questions", {}).items():
+        for key, s in stats.get("questions", {}).items():
             answered = int(s.get("answered", 0))
             correct = int(s.get("correct", 0))
             wrong = int(s.get("wrong", 0))
             avg = float(s.get("answer_time_total", 0)) / answered if answered else 0
             accuracy = correct / answered * 100 if answered else 0
-            # Accuracy is dominant; speed and recent wrong attempts refine the score.
             speed_score = 100 if avg <= 8 else max(0, 100 - (avg - 8) * 3)
-            wrong_penalty = min(25, wrong / max(1, answered) * 100 * 0.25)
-            mastery = max(0, min(100, accuracy * 0.75 + speed_score * 0.25 - wrong_penalty))
+            wrong_rate = wrong / max(1, answered)
+            mastery = max(0, min(100, accuracy * 0.75 + speed_score * 0.25 - min(25, wrong_rate * 25)))
             if mastery >= 85 and accuracy >= 85:
                 rec = "Strong — maintain it"
             elif mastery >= 70 and accuracy >= 70:
@@ -424,12 +423,12 @@ class AnalyticsDialog(QDialog):
                 rec = "Needs practice"
             else:
                 rec = "Weak point — prioritize practice"
-            rows.append((mastery, topic, answered, accuracy, avg, wrong, rec))
+            rows.append((mastery, str(s.get("subject", "")), str(s.get("topic", key)), answered, accuracy, avg, wrong, rec))
         rows.sort(key=lambda x: x[0])
-        for mastery, topic, answered, accuracy, avg, wrong, rec in rows:
+        for mastery, subject, topic, answered, accuracy, avg, wrong, rec in rows:
             row = table.rowCount()
             table.insertRow(row)
-            values = [topic, str(answered), f"{accuracy:.0f}%", f"{avg:.1f}s", str(wrong), f"{mastery:.0f}/100", rec]
+            values = [subject, topic, str(answered), f"{accuracy:.0f}%", f"{avg:.1f}s", str(wrong), f"{mastery:.0f}/100", rec]
             for col, value in enumerate(values):
                 table.setItem(row, col, QTableWidgetItem(value))
         if not rows:
@@ -450,16 +449,12 @@ class StudyLock(QMainWindow):
         self.remaining = 0.0
         self.last_tick = time.monotonic()
         self.current_question = None
-        self.current_question_index = -1
-        self.question_pool_key = ""
         self.target_exe = str(self.settings.get("target_exe", ""))
         self.target_pid = self.settings.get("target_pid")
         self.target_display = str(self.settings.get("target_display", ""))
         self.overlay = None
-        self.session_wrong = 0
         self.recent_question_ids = []
         self.build_ui()
-
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.tick)
         self.timer.start(250)
@@ -502,11 +497,9 @@ class StudyLock(QMainWindow):
         game_row.addWidget(select_game)
         game_row.addWidget(clear_game)
         root.addLayout(game_row)
-
-        self.any_app = QCheckBox("Lock the selected game only (recommended)")
-        self.any_app.setChecked(True)
-        self.any_app.setEnabled(False)
-        root.addWidget(self.any_app)
+        lock_note = QLabel("🔒 Only the selected game is subject to the StudyLock question. Chrome, Google, Discord and other apps remain available.")
+        lock_note.setWordWrap(True)
+        root.addWidget(lock_note)
 
         buttons = QHBoxLayout()
         start = QPushButton("▶ Start StudyLock")
@@ -529,7 +522,7 @@ class StudyLock(QMainWindow):
         self.status = QLabel("Ready")
         self.status.setFont(QFont("Segoe UI", 18, QFont.Weight.DemiBold))
         root.addWidget(self.status)
-        self.details = QLabel("Select a game, choose a question set, and start. Leaving the selected game for an emergency is allowed; the pending question returns when you return to the game."))
+        self.details = QLabel("Select a game, choose a question set, and start. Leaving the selected game for an emergency is allowed; the pending question returns when you return to the game.")
         self.details.setWordWrap(True)
         root.addWidget(self.details)
         root.addStretch()
@@ -583,14 +576,13 @@ class StudyLock(QMainWindow):
         self.remaining = self.interval.value() * 60.0
         self.last_tick = time.monotonic()
         self.current_question = None
-        self.session_wrong = 0
         self.recent_question_ids.clear()
         self.stats["sessions"] = int(self.stats.get("sessions", 0)) + 1
         save_stats(self.stats)
         self.settings["interval_minutes"] = self.interval.value()
         atomic_save_json(SETTINGS_FILE, self.settings)
         self.status.setText("RUNNING — game time earned")
-        self.details.setText(f"Watching only: {self.target_display}. Other apps remain available.")
+        self.details.setText(f"Watching only: {self.target_display}. Other apps remain available at all times.")
 
     def stop_lock(self):
         self.locked = False
@@ -621,18 +613,18 @@ class StudyLock(QMainWindow):
         self.last_tick = now
         if not self.locked:
             return
-
-        # If a question is pending, only show it when the selected game has focus.
         if self.current_question:
             if self.target_is_foreground():
-                if self.overlay is None or not self.overlay.isVisible():
+                if self.overlay is None:
                     self.show_question_overlay()
+                elif not self.overlay.isVisible():
+                    self.overlay.show()
+                    self.overlay.cover_virtual_desktop()
+                    self.overlay.force_foreground()
                 self.status.setText("LOCKED — answer the question to continue")
             else:
                 self.status.setText("QUESTION WAITING — other apps are available")
             return
-
-        # The timer represents time spent in the selected game, not time spent in Chrome.
         if not self.target_is_foreground():
             self.status.setText("PAUSED — selected game is not active")
             return
@@ -652,18 +644,30 @@ class StudyLock(QMainWindow):
         self.show_question_overlay()
 
     def show_question_overlay(self):
-        if not self.current_question or self.overlay is not None:
+        if not self.current_question:
             return
-        self.overlay = QuestionOverlay(self.current_question, self.question_finished, self.on_overlay_left_game)
+        if self.overlay is not None:
+            if not self.overlay.isVisible() and self.target_is_foreground():
+                self.overlay.show()
+                self.overlay.cover_virtual_desktop()
+                self.overlay.force_foreground()
+            return
+        self.overlay = QuestionOverlay(self.current_question, self.question_finished, self.target_is_foreground)
         self.overlay.show()
         self.status.setText("LOCKED — answer the question to continue")
 
-    def on_overlay_left_game(self):
-        # Do not destroy the pending question. It is the lock attached to this game.
-        if self.current_question:
-            self.status.setText("QUESTION WAITING — other apps are available")
+    def record_wrong_attempt(self, question):
+        topic = str(question.get("topic") or "General")
+        key = f"{self.subject.currentText()}::{topic}"
+        item = self.stats["questions"].setdefault(key, {
+            "subject": self.subject.currentText(), "topic": topic, "answered": 0,
+            "correct": 0, "wrong": 0, "answer_time_total": 0.0,
+            "best_time": None, "recent": []
+        })
+        item["wrong"] += 1
+        save_stats(self.stats)
 
-    def record_result(self, question, correct, answer_time, wrong_attempts):
+    def record_correct(self, question, answer_time, wrong_attempts):
         topic = str(question.get("topic") or "General")
         key = f"{self.subject.currentText()}::{topic}"
         item = self.stats["questions"].setdefault(key, {
@@ -672,16 +676,13 @@ class StudyLock(QMainWindow):
             "best_time": None, "recent": []
         })
         item["answered"] += 1
-        item["wrong"] += int(wrong_attempts)
+        item["correct"] += 1
         item["answer_time_total"] += float(answer_time)
-        if correct:
-            item["correct"] += 1
         if item["best_time"] is None or answer_time < float(item["best_time"]):
             item["best_time"] = float(answer_time)
-        item["recent"] = (item.get("recent", []) + [{"correct": correct, "time": answer_time}])[-20:]
+        item["recent"] = (item.get("recent", []) + [{"correct": True, "time": answer_time, "wrong_attempts": wrong_attempts}])[-20:]
         self.stats["total_answered"] = int(self.stats.get("total_answered", 0)) + 1
-        if correct:
-            self.stats["total_correct"] = int(self.stats.get("total_correct", 0)) + 1
+        self.stats["total_correct"] = int(self.stats.get("total_correct", 0)) + 1
         save_stats(self.stats)
 
     def question_finished(self, value, elapsed, wrong_attempts):
@@ -702,11 +703,9 @@ class StudyLock(QMainWindow):
             except (ValueError, TypeError):
                 pass
         if not correct:
-            # Wrong attempts are recorded only when the question is eventually solved,
-            # so the topic gets a complete picture without creating duplicate questions.
+            self.record_wrong_attempt(question)
             return False
-
-        self.record_result(question, True, elapsed, wrong_attempts)
+        self.record_correct(question, elapsed, wrong_attempts)
         self.current_question = None
         self.remaining = self.interval.value() * 60.0
         if self.overlay:
@@ -757,9 +756,8 @@ class StudyLock(QMainWindow):
 def main():
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
-    app.setQuitOnLastWindowClosed(True)
     if sys.platform != "win32":
-        QMessageBox.warning(None, APP_NAME, "StudyLock's game detection and external lock are currently designed for Windows.")
+        QMessageBox.warning(None, APP_NAME, "StudyLock's game detection and external lock are designed for Windows.")
     window = StudyLock()
     window.show()
     sys.exit(app.exec())
