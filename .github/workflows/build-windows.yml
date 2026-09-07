@@ -23,6 +23,12 @@ jobs:
           pip install -r requirements.txt
           pip install pyinstaller
 
+      - name: Syntax check
+        run: python -m py_compile main.py test_studylock.py
+
+      - name: Unit tests
+        run: python -m unittest test_studylock.py -v
+
       - name: Build EXE
         run: pyinstaller --noconfirm --clean --onefile --windowed --name StudyLock main.py
 
