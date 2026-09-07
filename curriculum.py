@@ -19,12 +19,13 @@ class Curriculum:
 
 
 # Product roadmap: keep this list small until the core app is finalized.
+# O Level is intentionally hidden for now while the A Level question flow is tested.
 CURRICULA: tuple[Curriculum, ...] = (
     Curriculum(
         id="gcse",
         name="GCSE",
         subjects=("Chemistry",),
-        qualification_stages=("O Level", "A Level", "AS Only", "A2"),
+        qualification_stages=("A Level", "AS Only", "A2"),
     ),
 )
 
