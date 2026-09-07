@@ -259,13 +259,13 @@ class Overlay(QWidget):
     def watch(self):
         target_hwnd, target_pid = self.target_info()
         f_hwnd, f_pid = foreground()
-        # The question remains visible while it owns focus. If the user Alt+Tabs away,
-        # it hides. Returning to the selected game shows it again.
         if self.overlay_hwnd and f_hwnd == self.overlay_hwnd:
             return
         if target_hwnd and f_pid == target_pid:
             r = window_rect(target_hwnd)
-            if r: self.setGeometry(r)
+            if r:
+                screen = QApplication.screenAt(r.center()) or QApplication.primaryScreen()
+                self.setGeometry(screen.geometry())
             if not self.isVisible(): self.show()
             make_topmost(self.overlay_hwnd or int(self.winId()))
         else:
@@ -412,6 +412,9 @@ class MainWindow(QMainWindow):
         e.accept()
 
 def main():
-    app = QApplication(sys.argv); app.setApplicationName(APP_NAME); w = MainWindow(); w.show(); sys.exit(app.exec())
+    app = QApplication(sys.argv); app.setApplicationName(APP_NAME)
+    from timer_feature import install
+    w = install(sys.modules[__name__])
+    w.show(); sys.exit(app.exec())
 
 if __name__ == "__main__": main()
