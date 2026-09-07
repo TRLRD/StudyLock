@@ -1,0 +1,14 @@
+{
+  "Chemistry": [
+    {"question": "What is the charge of a proton?", "answers": ["+1", "positive one", "1"]},
+    {"question": "What is the chemical symbol for sodium?", "answers": ["Na"]}
+  ],
+  "Physics": [
+    {"question": "What is the SI unit of force?", "answers": ["N", "newton", "newtons"]},
+    {"question": "What is the approximate acceleration due to gravity on Earth?", "answers": ["9.8", "9.81"]}
+  ],
+  "Math": [
+    {"question": "What is 12 × 8?", "answers": ["96"]},
+    {"question": "What is the square root of 81?", "answers": ["9"]}
+  ]
+}
