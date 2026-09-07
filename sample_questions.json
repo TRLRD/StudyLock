@@ -1,26 +1,109 @@
 {
-  "Chemistry": [
+  "questions": [
     {
-      "question": "What is the charge of a proton?",
-      "answers": ["+1", "positive one", "1"],
-      "topic": "Atomic structure",
+      "id": "al-001",
+      "question": "Which species is oxidised when magnesium reacts with hydrochloric acid?",
+      "choices": ["Mg", "H+", "Cl−", "H2"],
+      "answers": ["Mg"],
+      "topic": "Redox",
       "difficulty": "Easy",
       "curriculum": "gcse",
       "subject": "Chemistry",
-      "qualification_stage": "O Level",
-      "exam_board": "Sample",
-      "paper_reference": "Sample question 1"
+      "qualification_stage": "A Level",
+      "exam_board": "StudyLock Original",
+      "paper_reference": "Seed 001"
     },
     {
-      "question": "What is the chemical symbol for sodium?",
-      "answers": ["Na"],
-      "topic": "Atomic structure",
+      "id": "al-002",
+      "question": "What is the oxidation number of sulfur in SO4^2−?",
+      "choices": ["+2", "+4", "+6", "−2"],
+      "answers": ["+6", "6"],
+      "topic": "Oxidation numbers",
       "difficulty": "Easy",
       "curriculum": "gcse",
       "subject": "Chemistry",
-      "qualification_stage": "O Level",
-      "exam_board": "Sample",
-      "paper_reference": "Sample question 2"
+      "qualification_stage": "A Level",
+      "exam_board": "StudyLock Original",
+      "paper_reference": "Seed 002"
+    },
+    {
+      "id": "al-003",
+      "question": "Which type of bonding is present between atoms in a giant covalent structure?",
+      "choices": ["Metallic", "Ionic", "Covalent", "Hydrogen bonding"],
+      "answers": ["Covalent"],
+      "topic": "Bonding",
+      "difficulty": "Easy",
+      "curriculum": "gcse",
+      "subject": "Chemistry",
+      "qualification_stage": "A Level",
+      "exam_board": "StudyLock Original",
+      "paper_reference": "Seed 003"
+    },
+    {
+      "id": "al-004",
+      "question": "For a gaseous equilibrium, what happens when pressure is increased if the product side has fewer moles of gas?",
+      "choices": ["It moves to products", "It moves to reactants", "It does not change", "The reaction stops"],
+      "answers": ["It moves to products"],
+      "topic": "Equilibria",
+      "difficulty": "Normal",
+      "curriculum": "gcse",
+      "subject": "Chemistry",
+      "qualification_stage": "A Level",
+      "exam_board": "StudyLock Original",
+      "paper_reference": "Seed 004"
+    },
+    {
+      "id": "al-005",
+      "question": "What is the formula of the conjugate base formed when NH4+ donates a proton?",
+      "choices": ["NH3", "NH2−", "NH4OH", "N2H4"],
+      "answers": ["NH3"],
+      "topic": "Acids and bases",
+      "difficulty": "Easy",
+      "curriculum": "gcse",
+      "subject": "Chemistry",
+      "qualification_stage": "A Level",
+      "exam_board": "StudyLock Original",
+      "paper_reference": "Seed 005"
+    },
+    {
+      "id": "al-006",
+      "question": "A reaction has an enthalpy change of −125 kJ mol−1. Is the reaction exothermic or endothermic?",
+      "choices": ["Exothermic", "Endothermic"],
+      "answers": ["Exothermic"],
+      "topic": "Energetics",
+      "difficulty": "Easy",
+      "curriculum": "gcse",
+      "subject": "Chemistry",
+      "qualification_stage": "A Level",
+      "exam_board": "StudyLock Original",
+      "paper_reference": "Seed 006"
+    },
+    {
+      "id": "al-007",
+      "question": "Calculate the amount of substance in 0.50 mol dm−3 solution when 0.020 dm3 is used. Give the answer in mol.",
+      "choices": [],
+      "answers": ["0.010", "0.01", "1.0e-2"],
+      "topic": "Amount of substance",
+      "difficulty": "Normal",
+      "numeric_tolerance": 0.0002,
+      "curriculum": "gcse",
+      "subject": "Chemistry",
+      "qualification_stage": "A Level",
+      "exam_board": "StudyLock Original",
+      "paper_reference": "Seed 007"
+    },
+    {
+      "id": "al-008",
+      "question": "Which particle has the same number of electrons as a neutral neon atom?",
+      "choices": ["Na+", "Na", "F−", "O2−"],
+      "answers": ["Na+", "F−"],
+      "topic": "Atomic structure",
+      "difficulty": "Normal",
+      "curriculum": "gcse",
+      "subject": "Chemistry",
+      "qualification_stage": "A Level",
+      "exam_board": "StudyLock Original",
+      "paper_reference": "Seed 008"
     }
   ]
 }
