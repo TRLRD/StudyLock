@@ -78,10 +78,8 @@ def _bind_installer_method(method_name):
     original = _original_build_ui if method_name == "build_ui" else getattr(engine.MainWindow, method_name)
 
     def bound(self, *args, **kwargs):
-        # The UI installer creates zero-argument nested functions. Rebind their
-        # closure tree first so every nested helper sees the actual MainWindow,
-        # then execute without injecting an extra positional self argument.
         ui_overhaul.self = self
+        ui_overhaul.base.self = self
         rebound = _rebind_function(original, self)
         return rebound(*args, **kwargs)
 
