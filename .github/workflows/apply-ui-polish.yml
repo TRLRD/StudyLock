@@ -1,15 +1,15 @@
 name: Apply StudyLock UI polish
 
+# Disabled for automatic development. Run manually only when deliberately applying the old polish patcher.
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
   polish:
-    if: github.event.head_commit.message != 'Apply StudyLock UI polish'
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
