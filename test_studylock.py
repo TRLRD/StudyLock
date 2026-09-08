@@ -39,9 +39,12 @@ class StudyLockCoreTests(unittest.TestCase):
         cleaned = main.validate_questions([q])[0]
         self.assertEqual(cleaned["numeric_tolerance"], 0.1)
 
-    def test_process_rows_has_expected_shape(self):
-        rows = main.process_rows()
-        self.assertTrue(all(len(row) == 3 for row in rows))
+    def test_validated_question_has_expected_runtime_fields(self):
+        q = {"question":"number","answers":["10"],"curriculum":"gcse","subject":"Chemistry","qualification_stage":"A Level"}
+        cleaned = main.validate_questions([q])[0]
+        self.assertEqual(cleaned["id"], "q-1")
+        self.assertEqual(cleaned["topic"], "General")
+        self.assertEqual(cleaned["paper"], "all")
 
 
 if __name__ == "__main__":
