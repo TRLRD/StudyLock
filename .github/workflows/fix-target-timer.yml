@@ -1,17 +1,15 @@
 name: Fix target-activated timer
 
+# Disabled for automatic development. Run manually only when deliberately applying this legacy patcher.
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - 'main.py'
-      - '.github/workflows/fix-target-timer.yml'
 
 permissions:
   contents: write
 
 jobs:
   patch:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
