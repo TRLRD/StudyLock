@@ -31,10 +31,10 @@ install_ui(
 def _bind_installer_method(method_name):
     """Turn an installer-scope function into a real MainWindow method.
 
-    The functions created by install_ui intentionally close over the module-level
+    The functions created by install_ui intentionally use the module-level
     installer context. Before invoking one, point that context at the actual
-    MainWindow instance. This also handles methods whose original signature has
-    no explicit ``self`` parameter.
+    MainWindow instance. The wrapper itself owns the Python instance binding, so
+    the installer function never receives an unexpected implicit ``self``.
     """
     original = getattr(engine.MainWindow, method_name)
 
@@ -43,6 +43,7 @@ def _bind_installer_method(method_name):
         return original(*args, **kwargs)
 
     bound.__name__ = getattr(original, "__name__", method_name)
+    bound.__doc__ = getattr(original, "__doc__", None)
     return bound
 
 
@@ -53,6 +54,7 @@ engine.MainWindow.build_ui = _bind_installer_method("build_ui")
 # These presentation methods are also installed from nested functions. Bind
 # them explicitly so callbacks and Qt signals always operate on the right window.
 for _name in (
+    "apply_theme",
     "refresh_status",
     "refresh_game_label",
     "pick_game",
