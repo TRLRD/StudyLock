@@ -131,3 +131,9 @@ for _name in (
     "open_quick_settings",
 ):
     setattr(engine.MainWindow, _name, _bind_installer_method(_name))
+
+
+# PyInstaller starts this module as the executable entry point, so explicitly
+# hand control to the application's real main() after installing the UI layer.
+if __name__ == "__main__":
+    engine.main()
