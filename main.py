@@ -417,9 +417,9 @@ class AnswerButton(QPushButton):
                 "QPushButton:hover{background:rgba(58,76,119,248);border:1px solid rgba(127,151,255,235);padding-left:22px;} "
                 "QPushButton:pressed{background:rgba(92,124,255,255);border:1px solid rgba(180,195,255,255);padding-left:25px;}")
 class Overlay(QWidget):
-    def __init__(self, question, answer_callback, target_callback, settings):
+    def __init__(self, question, answer_callback, target_callback, settings, test_mode=False):
         super().__init__()
-        self.question = question; self.answer_callback = answer_callback; self.target_callback = target_callback; self.settings = settings
+        self.question = question; self.answer_callback = answer_callback; self.target_callback = target_callback; self.settings = settings; self.test_mode = test_mode
         self.allow_close = False; self.started = time.monotonic(); self.hwnd = 0
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose); self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -469,6 +469,10 @@ class Overlay(QWidget):
         self.reveal_anim = QPropertyAnimation(self, b"geometry", self); self.reveal_anim.setDuration(520); self.reveal_anim.setStartValue(start); self.reveal_anim.setEndValue(final); self.reveal_anim.setEasingCurve(QEasingCurve.Type.OutCubic); self.reveal_anim.start()
 
     def watch_target(self):
+        if self.test_mode:
+            if not self.isVisible():
+                self.show()
+            return
         hwnd, pid = self.target_callback(); foreground_hwnd, foreground_pid = foreground()
         if self.hwnd and foreground_hwnd == self.hwnd: return
         if hwnd and foreground_pid == pid:
@@ -535,7 +539,7 @@ class MainWindow(QMainWindow):
         controls = self.card(); row = QHBoxLayout(controls); row.setContentsMargins(22, 18, 22, 18); label = QLabel("Question interval"); label.setObjectName("muted"); row.addWidget(label); self.interval = QSpinBox(); self.interval.setRange(5,3600); self.interval.setValue(int(self.settings.get("interval",20))); self.interval.setSuffix(" sec"); row.addWidget(self.interval); row.addStretch()
         timer_button = QPushButton("Timer settings"); timer_button.clicked.connect(self.timer_settings); row.addWidget(timer_button); performance = QPushButton("Performance"); performance.clicked.connect(lambda: self.show_perf(False)); row.addWidget(performance); weak = QPushButton("Practice weak areas"); weak.clicked.connect(lambda: self.show_perf(True)); row.addWidget(weak); outer.addWidget(controls)
 
-        actions = QHBoxLayout(); self.start_button = QPushButton("START STUDYLOCK"); self.start_button.setObjectName("primary"); self.start_button.setMinimumWidth(190); self.start_button.clicked.connect(self.toggle); actions.addWidget(self.start_button); stop_button = QPushButton("STOP"); stop_button.setMinimumWidth(90); stop_button.clicked.connect(self.stop); actions.addWidget(stop_button); actions.addStretch(); imp = QPushButton("Import question bank"); imp.clicked.connect(self.import_questions); actions.addWidget(imp); exp = QPushButton("Export question bank"); exp.clicked.connect(self.export_questions); actions.addWidget(exp); outer.addLayout(actions)
+        actions = QHBoxLayout(); self.start_button = QPushButton("START STUDYLOCK"); self.start_button.setObjectName("primary"); self.start_button.setMinimumWidth(190); self.start_button.clicked.connect(self.toggle); actions.addWidget(self.start_button); stop_button = QPushButton("STOP"); stop_button.setMinimumWidth(90); stop_button.clicked.connect(self.stop); actions.addWidget(stop_button); test_button = QPushButton("TEST QUESTION"); test_button.setToolTip("Show one question now without requiring the selected game to be running."); test_button.clicked.connect(self.trigger_test_question); actions.addWidget(test_button); actions.addStretch(); imp = QPushButton("Import question bank"); imp.clicked.connect(self.import_questions); actions.addWidget(imp); exp = QPushButton("Export question bank"); exp.clicked.connect(self.export_questions); actions.addWidget(exp); outer.addLayout(actions)
 
         info = self.card(); info_layout = QVBoxLayout(info); info_layout.setContentsMargins(22,18,22,18); note = QLabel("StudyLock only interrupts the selected game. Switching to another app hides the question; returning to the selected game shows it again."); note.setWordWrap(True); info_layout.addWidget(note); self.bank_label = QLabel(); self.bank_label.setObjectName("muted"); info_layout.addWidget(self.bank_label); outer.addWidget(info); outer.addStretch(); self.setCentralWidget(root)
 
@@ -590,7 +594,12 @@ class MainWindow(QMainWindow):
         record = self.stats.setdefault("questions", {}).setdefault(question["id"], {"attempts":0,"correct":0,"wrong":0,"times":[],"topic":question.get("topic","General")}); record["attempts"] += 1; record["times"].append(round(elapsed,2)); self.stats["total_answered"] = self.stats.get("total_answered",0) + 1
         if correct: record["correct"] += 1; self.stats["total_correct"] = self.stats.get("total_correct",0) + 1
         else: record["wrong"] += 1
-        save_stats(self.stats); self.current = None; self.refresh_status(); return correct
+        save_stats(self.stats)
+        # Detach the consumed overlay before Qt's WA_DeleteOnClose destroys it.
+        self.current = None
+        self.overlay = None
+        self.refresh_status()
+        return correct
 
     def target(self):
         game = self.settings.get("game") or {}; hwnd, pid = foreground();
@@ -601,15 +610,52 @@ class MainWindow(QMainWindow):
         except psutil.Error: pass
         return 0, 0
 
-    def trigger_question(self):
-        if not self.running: return
+    def trigger_test_question(self):
+        if self.overlay is not None:
+            try:
+                self.overlay.allow_close = True
+                self.overlay.close()
+            except RuntimeError:
+                pass
+            self.overlay = None
         question = self.choose_question()
-        if not question: return
-        self.current = question; self.overlay = Overlay(question, self.answer, self.target, self.settings); self.overlay.show()
+        if not question:
+            QMessageBox.warning(self, APP_NAME, "No questions match the current selection.")
+            return
+        self.current = question
+        self.overlay = Overlay(question, self.answer, self.target, self.settings, test_mode=True)
+        self.overlay.show()
+
+    def trigger_question(self):
+        if not self.running:
+            return
+        if self.overlay is not None:
+            try:
+                self.overlay.allow_close = True
+                self.overlay.close()
+            except RuntimeError:
+                pass
+            self.overlay = None
+        question = self.choose_question()
+        if not question:
+            return
+        self.current = question
+        self.overlay = Overlay(question, self.answer, self.target, self.settings)
+        self.overlay.show()
 
     def trigger_with_animation(self):
-        hwnd, _ = self.target(); rect = window_rect(hwnd) if hwnd else None; screen = QApplication.screenAt(rect.center()) if rect else QApplication.primaryScreen(); screen = screen or QApplication.primaryScreen(); geometry = screen.geometry()
-        self.lock_anim = LockChain(geometry, bool(self.settings.get("reduced_motion"))); self.lock_anim.start(); QTimer.singleShot(720 if not self.settings.get("reduced_motion") else 190, self.trigger_question)
+        if not self.running:
+            return
+        hwnd, _ = self.target()
+        rect = window_rect(hwnd) if hwnd else None
+        screen = QApplication.screenAt(rect.center()) if rect else QApplication.primaryScreen()
+        screen = screen or QApplication.primaryScreen()
+        geometry = screen.geometry()
+        self.lock_anim = LockChain(None, bool(self.settings.get("reduced_motion")))
+        self.lock_anim.setGeometry(geometry)
+        self.lock_anim.start()
+        delay = 720 if not self.settings.get("reduced_motion") else 190
+        QTimer.singleShot(delay, lambda: self.trigger_question() if self.running else None)
 
     def start_run(self):
         if not self.settings.get("game"): QMessageBox.warning(self, APP_NAME, "Select a game first."); return
@@ -620,10 +666,30 @@ class MainWindow(QMainWindow):
     def toggle(self): self.stop() if self.running else self.start_run()
 
     def stop(self):
-        self.running = False; self.tick.stop()
-        if hasattr(self, "hud"): self.hud.close()
-        if self.overlay: self.overlay.allow_close = True; self.overlay.close(); self.overlay = None
-        self.current = None; self.status.setText("STOPPED"); self.start_button.setText("START STUDYLOCK")
+        self.running = False
+        self.tick.stop()
+        self.next_at = 0
+        if hasattr(self, "hud"):
+            self.hud.close()
+            self.hud = None
+        if self.overlay is not None:
+            try:
+                self.overlay.allow_close = True
+                self.overlay.close()
+            except RuntimeError:
+                pass
+            self.overlay = None
+        if self.lock_anim is not None:
+            try:
+                self.lock_anim.timer.stop()
+                self.lock_anim.close()
+            except RuntimeError:
+                pass
+            self.lock_anim = None
+        self.current = None
+        self.status.setText("STOPPED")
+        self.status.setStyleSheet("background:#151d29;color:#aeb9ca;border:1px solid #29364a;border-radius:11px;padding:6px 11px;font-weight:700;")
+        self.start_button.setText("START STUDYLOCK")
 
     def loop(self):
         if not self.running: return
