@@ -1,8 +1,8 @@
 """Production launcher for the StudyLock desktop build.
 
 The existing main.py remains the application engine. This launcher installs the
-presentation layer before creating MainWindow, so the engine and its tests
-remain intact while the packaged EXE gets the new UI.
+presentation layer before creating MainWindow, so the packaged EXE gets the UI
+without changing the engine's behavior.
 """
 
 import types
@@ -54,14 +54,17 @@ _original_build_ui = engine.MainWindow.build_ui
 
 
 def _bind_installer_method(method_name):
-    """Bind a presentation installer function to the real MainWindow instance."""
-    original = getattr(engine.MainWindow, method_name)
-    if method_name == "build_ui":
-        original = _original_build_ui
+    """Bind an installed presentation function to the real MainWindow instance."""
+    original = _original_build_ui if method_name == "build_ui" else getattr(engine.MainWindow, method_name)
 
     def bound(self, *args, **kwargs):
         ui_overhaul.self = self
-        return original(self, *args, **kwargs) if method_name == "build_ui" else original(self, *args, **kwargs)
+        # build_ui_plus is installed as a zero-argument function because it
+        # resolves the runtime window through ui_aura_plus.self. Do not pass
+        # self into that function.
+        if method_name == "build_ui":
+            return original()
+        return original(self, *args, **kwargs)
 
     bound.__name__ = getattr(original, "__name__", method_name)
     bound.__doc__ = getattr(original, "__doc__", None)
