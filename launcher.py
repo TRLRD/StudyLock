@@ -13,7 +13,7 @@ from ui_overhaul import install_ui
 
 # install_ui builds presentation methods as nested functions. Keep the installer
 # isolated from the MainWindow instance, then bind those functions explicitly
-after installation so Python supplies the correct instance at runtime.
+# after installation so Python supplies the correct instance at runtime.
 ui_overhaul.self = engine.MainWindow
 
 install_ui(
