@@ -28,6 +28,21 @@ def _replace_cell(fn,predicate,replacement):
         if predicate(value): cells[i]=(lambda v:(lambda:v))(replacement).__closure__[0]; return types.FunctionType(fn.__code__,fn.__globals__,fn.__name__,fn.__defaults__,tuple(cells))
     return fn
 def _normalize_build(fn):
+    # install_ui() creates nested functions with its installer-time `self`.
+    # Replace every closure cell that points at the MainWindow class with the
+    # actual runtime instance. This keeps the original UI implementation intact.
+    runtime=base.self
+    cells=list(fn.__closure__ or ())
+    changed=False
+    for i,cell in enumerate(cells):
+        try: value=cell.cell_contents
+        except ValueError: continue
+        if value is runtime or value is getattr(runtime,"__class__",None):
+            cells[i]=(lambda v:(lambda:v))(runtime).__closure__[0]; changed=True
+    if changed:
+        fn=types.FunctionType(fn.__code__,fn.__globals__,fn.__name__,fn.__defaults__,tuple(cells))
+    # The header helper is another nested function whose closure may still hold
+    # the installer-time class. Normalize it separately because build_ui calls it.
     for cell in fn.__closure__ or ():
         try: value=cell.cell_contents
         except ValueError: continue
@@ -35,7 +50,8 @@ def _normalize_build(fn):
             def factory(helper):
                 def fixed(): return helper(base.self)
                 return fixed
-            return _replace_cell(fn,lambda current,target=value:current is target,factory(value))
+            fn=_replace_cell(fn,lambda current,target=value:current is target,factory(value))
+            break
     return fn
 def _settings_page(TimerSettings,save_settings,w):
     page=QWidget(); outer=QVBoxLayout(page); outer.setContentsMargins(38,26,38,36); outer.setSpacing(16); top=QHBoxLayout(); back=QPushButton("←  Back"); back.setObjectName("ghost"); back.clicked.connect(lambda:w.go_page(w.home_page,-1)); top.addWidget(back); top.addStretch(); outer.addLayout(top); title=QLabel("Settings"); title.setObjectName("pageHeading"); outer.addWidget(title); sub=QLabel("Everything that controls your StudyLock experience, in one place."); sub.setObjectName("pageSubtitle"); outer.addWidget(sub)
@@ -57,7 +73,8 @@ def install_ui(*args,**kwargs):
     def build_ui_plus():
         w=base.self; stable_build.__globals__["self"]=w; stable_build(); w.settings_page=_settings_page(TimerSettings,save_settings,w); w.stack.addWidget(w.settings_page); root=w.home_page.widget()
         for card in root.findChildren(base.RippleCard):
-            for label in [x for x in card.findChildren(QLabel) if x.text().strip().lower().startswith("change")]: button=QPushButton("CHANGE"); button.setObjectName("cardAction"); card.layout().replaceWidget(label,button); label.deleteLater(); button.clicked.connect(card.clicked.emit)
+            for label in [x for x in card.findChildren(QLabel) if x.text().strip().lower().startswith("change")]:
+                button=QPushButton("CHANGE"); button.setObjectName("cardAction"); card.layout().replaceWidget(label,button); label.deleteLater(); button.clicked.connect(card.clicked.emit)
         for card in root.findChildren(base.RippleCard):
             text=" ".join(x.text() for x in card.findChildren(QLabel))
             if "Question Interval" in text:
