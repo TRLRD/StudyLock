@@ -24,13 +24,13 @@ jobs:
           pip install pyinstaller
 
       - name: Syntax check
-        run: python -m py_compile main.py timer_feature.py test_studylock.py test_timer_feature.py
+        run: python -m py_compile main.py timer_feature.py launcher.py ui_overhaul.py test_studylock.py test_timer_feature.py
 
       - name: Unit tests
         run: python -m unittest test_studylock.py test_timer_feature.py -v
 
       - name: Build EXE
-        run: pyinstaller --noconfirm --clean --onefile --windowed --name StudyLock main.py
+        run: pyinstaller --noconfirm --clean --onefile --windowed --name StudyLock launcher.py
 
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
