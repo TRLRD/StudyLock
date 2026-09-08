@@ -43,7 +43,7 @@ def _replace_closure_cell(function, predicate, replacement):
         return function
 
     cells = list(closure)
-    for index, cell in enumerate(cells):
+    for index, cell in enumerate(closure):
         try:
             value = cell.cell_contents
         except ValueError:
