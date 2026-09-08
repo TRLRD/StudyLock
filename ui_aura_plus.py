@@ -90,6 +90,9 @@ def install_ui(*args,**kwargs):
         w.apply_theme()
     def open_settings(): base.self.go_page(base.self.settings_page,1)
     MainWindow.build_ui=build_ui_plus; MainWindow.open_quick_settings=open_settings; original_apply=MainWindow.apply_theme
-    def apply_theme_plus():
-        w=base.self; original_apply(); [card.set_selected(card.name==w.settings.get("theme")) for card in getattr(w,"settings_theme_cards",[])]
+    def apply_theme_plus(self):
+        w=self
+        original_apply()
+        for card in getattr(w,"settings_theme_cards",[]):
+            card.set_selected(card.name==w.settings.get("theme"))
     MainWindow.apply_theme=apply_theme_plus
