@@ -28,40 +28,62 @@ install_ui(
 )
 
 
-def _replace_closure_cell(function, predicate, replacement):
+def _rebind_function(function, instance, seen=None):
+    """Recursively replace installer-time MainWindow class closures with instance."""
+    if not isinstance(function, types.FunctionType):
+        return function
+    seen = set() if seen is None else seen
+    if id(function) in seen:
+        return function
+    seen.add(id(function))
+
     closure = function.__closure__
     if not closure:
         return function
+
     cells = list(closure)
+    changed = False
     for index, cell in enumerate(closure):
         try:
             value = cell.cell_contents
         except ValueError:
             continue
-        if predicate(value):
-            cells[index] = (lambda value: (lambda: value))(replacement).__closure__[0]
-            return types.FunctionType(
-                function.__code__,
-                function.__globals__,
-                function.__name__,
-                function.__defaults__,
-                tuple(cells),
-            )
-    return function
+
+        if value is engine.MainWindow:
+            cells[index] = (lambda value: (lambda: value))(instance).__closure__[0]
+            changed = True
+        elif isinstance(value, types.FunctionType):
+            rebound = _rebind_function(value, instance, seen)
+            if rebound is not value:
+                cells[index] = (lambda value: (lambda: value))(rebound).__closure__[0]
+                changed = True
+
+    if not changed:
+        return function
+
+    return types.FunctionType(
+        function.__code__,
+        function.__globals__,
+        function.__name__,
+        function.__defaults__,
+        tuple(cells),
+    )
 
 
 _original_build_ui = engine.MainWindow.build_ui
 
 
 def _bind_installer_method(method_name):
-    """Bind an installed zero-argument presentation function to the window."""
+    """Bind an installed presentation function to the real MainWindow instance."""
     original = _original_build_ui if method_name == "build_ui" else getattr(engine.MainWindow, method_name)
 
     def bound(self, *args, **kwargs):
-        # ui_overhaul's installer functions intentionally use their module-level
-        # `self`. Set it to the real instance, then call the function unchanged.
+        # The UI installer creates zero-argument nested functions. Rebind their
+        # closure tree first so every nested helper sees the actual MainWindow,
+        # then execute without injecting an extra positional self argument.
         ui_overhaul.self = self
-        return original(*args, **kwargs)
+        rebound = _rebind_function(original, self)
+        return rebound(*args, **kwargs)
 
     bound.__name__ = getattr(original, "__name__", method_name)
     bound.__doc__ = getattr(original, "__doc__", None)
