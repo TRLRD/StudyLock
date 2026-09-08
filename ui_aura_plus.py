@@ -92,7 +92,10 @@ def install_ui(*args,**kwargs):
     MainWindow.build_ui=build_ui_plus; MainWindow.open_quick_settings=open_settings; original_apply=MainWindow.apply_theme
     def apply_theme_plus(self):
         w=self
-        original_apply()
+        # MainWindow.apply_theme is a method on the class, but original_apply is
+        # captured as the raw function object. Call it with the instance explicitly
+        # so Python does not leave the nested ui_overhaul.apply_theme(self) unbound.
+        original_apply(w)
         for card in getattr(w,"settings_theme_cards",[]):
             card.set_selected(card.name==w.settings.get("theme"))
     MainWindow.apply_theme=apply_theme_plus
