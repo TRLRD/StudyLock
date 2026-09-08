@@ -161,24 +161,27 @@ def topmost(hwnd: int) -> None:
 
 
 STYLE = """
-QWidget { background:#090d13; color:#eef2f7; font-family:'Segoe UI'; font-size:14px; }
-QMainWindow { background:#070a0f; }
-QFrame#card { background:#101722; border:1px solid #202b3a; border-radius:16px; }
-QLabel#title { font-size:30px; font-weight:700; letter-spacing:1px; }
-QLabel#section { color:#aeb8c7; font-size:12px; font-weight:700; letter-spacing:1px; }
-QLabel#muted { color:#8793a5; }
-QLabel#status { background:#13241b; color:#6fe0a2; border:1px solid #214e37; border-radius:11px; padding:6px 11px; font-weight:700; }
-QLineEdit, QComboBox, QSpinBox { background:#0c121b; border:1px solid #293548; border-radius:10px; padding:10px; color:#eef2f7; min-height:20px; }
-QLineEdit:focus, QComboBox:focus, QSpinBox:focus { border:1px solid #647dff; }
-QComboBox QAbstractItemView { background:#101722; border:1px solid #334158; selection-background-color:#4259a8; padding:4px; }
-QPushButton { background:#151f2d; border:1px solid #2a394d; border-radius:11px; padding:10px 15px; font-weight:650; }
-QPushButton:hover { background:#263651; border-color:#6c82ff; }
-QPushButton:pressed { background:#526bd1; border-color:#8295ff; padding-top:12px; padding-bottom:8px; }
-QPushButton#primary { background:#536df3; border:1px solid #7187ff; color:white; padding:12px 20px; }
-QPushButton#primary:hover { background:#6a82ff; }
-QPushButton#primary:pressed { background:#3f58c8; padding-top:14px; padding-bottom:10px; }
-QTableWidget { background:#0c121b; border:1px solid #202b3a; border-radius:10px; gridline-color:#202b3a; }
-QHeaderView::section { background:#151e2b; padding:9px; border:0; font-weight:700; }
+QWidget { background:#080b10; color:#eef2f7; font-family:"Segoe UI"; font-size:14px; }
+QMainWindow { background:#080b10; }
+QLabel { background:transparent; }
+QFrame#card { background:#101722; border:1px solid #202b3b; border-radius:16px; }
+QLabel#title { font-size:32px; font-weight:750; letter-spacing:1px; }
+QLabel#subtitle { color:#8995a8; font-size:13px; }
+QLabel#muted { color:#8f9bae; }
+QLabel#statusPill { background:#151d29; border:1px solid #29364a; border-radius:9px; padding:7px 12px; color:#aeb9ca; font-weight:650; }
+QLineEdit, QComboBox, QSpinBox { background:#0b111a; border:1px solid #273346; border-radius:10px; padding:10px; color:#eef2f7; min-height:20px; }
+QLineEdit:focus, QComboBox:focus, QSpinBox:focus { border:1px solid #607cff; }
+QPushButton { background:#151e2b; border:1px solid #2a394d; border-radius:10px; padding:10px 15px; font-weight:650; min-height:18px; }
+QPushButton:hover { background:#222f44; border-color:#637fff; }
+QPushButton:pressed { background:#31425f; padding-top:11px; padding-bottom:9px; }
+QPushButton#primary { background:#526fff; border-color:#7890ff; color:white; }
+QPushButton#primary:hover { background:#6681ff; }
+QPushButton#danger { background:#22161b; border-color:#56303a; color:#ffb6c0; }
+QPushButton#danger:hover { background:#332027; border-color:#b84b60; }
+QTableWidget { background:#0c121b; border:1px solid #202b3b; border-radius:10px; gridline-color:#202b3b; }
+QHeaderView::section { background:#151d29; padding:9px; border:0; font-weight:700; }
+QProgressBar { background:#0b111a; border:1px solid #263347; border-radius:7px; text-align:center; height:12px; }
+QProgressBar::chunk { background:#607cff; border-radius:6px; }
 """
 
 
@@ -325,72 +328,94 @@ class TimerHUD(QWidget):
 
 
 class LockChain(QWidget):
-    """Full-display lock animation: four locks travel from the exact center to the four corners."""
-    def __init__(self, geometry, reduced=False):
-        super().__init__()
-        self.setGeometry(geometry)
+    def __init__(self, parent=None, reduced=False):
+        super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.reduced = reduced
         self.progress = 0.0
-        self.timer = QTimer(self); self.timer.timeout.connect(self.step)
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.step)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
     def start(self):
-        self.progress = 0.0; self.show(); self.raise_()
+        self.progress = 0.0
+        self.show()
+        self.raise_()
         if self.reduced:
-            self.progress = 1.0; self.update(); QTimer.singleShot(160, self.finish)
+            self.progress = 1.0
+            self.update()
+            QTimer.singleShot(220, self.finish)
         else:
             self.timer.start(16)
 
     def step(self):
-        self.progress = min(1.0, self.progress + 0.026)
+        self.progress = min(1.0, self.progress + 0.028)
         self.update()
         if self.progress >= 1.0:
-            self.timer.stop(); QTimer.singleShot(170, self.finish)
+            self.timer.stop()
+            QTimer.singleShot(180, self.finish)
 
     def finish(self):
-        self.hide(); self.deleteLater()
+        self.hide()
+        self.deleteLater()
 
     def paintEvent(self, event):
-        p = QPainter(self); p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        w, h = self.width(), self.height(); center = QPointF(w / 2, h / 2)
-        inset = 38
-        corners = [QPointF(inset, inset), QPointF(w - inset, inset), QPointF(inset, h - inset), QPointF(w - inset, h - inset)]
-        # A subtle dark veil keeps the game visible while the lock mechanism is readable.
-        p.fillRect(self.rect(), QColor(7, 10, 15, 70))
-        eased = 1 - (1 - self.progress) ** 3
-        for corner in corners:
-            point = QPointF(center.x() + (corner.x() - center.x()) * eased, center.y() + (corner.y() - center.y()) * eased)
-            p.setPen(QPen(QColor(103, 126, 255, 185), 3)); p.drawLine(center, point)
-            # chain links
-            if eased > 0.05:
-                dx, dy = point.x() - center.x(), point.y() - center.y(); length = max(1.0, (dx * dx + dy * dy) ** 0.5)
-                ux, uy = dx / length, dy / length
-                for dist in range(45, int(length), 34):
-                    x, y = center.x() + ux * dist, center.y() + uy * dist
-                    p.setPen(QPen(QColor(160, 175, 220, 125), 2)); p.drawEllipse(int(x - 5), int(y - 5), 10, 10)
-            self.draw_lock(p, point, 0.95 if eased > 0.15 else eased * 5)
-        p.setPen(QPen(QColor(255,255,255,60), 1)); p.drawEllipse(int(center.x()-28), int(center.y()-28), 56, 56)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        w, h = self.width(), self.height()
+        center = QPointF(w / 2, h / 2)
+        inset = 8
+        corners = [
+            QPointF(inset, inset), QPointF(w - inset, inset),
+            QPointF(inset, h - inset), QPointF(w - inset, h - inset),
+        ]
+        painter.setPen(QPen(QColor(95, 126, 255, 205), 3))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        for end in corners:
+            t = min(1.0, max(0.0, self.progress * 1.12))
+            current = QPointF(center.x() + (end.x() - center.x()) * t,
+                              center.y() + (end.y() - center.y()) * t)
+            painter.drawLine(center, current)
+            if t > 0.08:
+                r = 25
+                painter.setBrush(QBrush(QColor(17, 23, 34, 245)))
+                painter.setPen(QPen(QColor(125, 149, 255, 240), 2))
+                painter.drawRoundedRect(int(current.x() - r), int(current.y() - r), r * 2, r * 2, 9, 9)
+                painter.setPen(QPen(QColor(235, 240, 250, 235), 3))
+                painter.drawArc(int(current.x() - 8), int(current.y() - 13), 16, 19, 0, 180 * 16)
+                painter.drawRect(int(current.x() - 9), int(current.y() - 3), 18, 13)
 
-    @staticmethod
-    def draw_lock(p, point, opacity):
-        alpha = max(20, min(235, int(235 * opacity))); x, y = int(point.x()), int(point.y())
-        p.setBrush(QBrush(QColor(16, 23, 35, alpha))); p.setPen(QPen(QColor(120, 143, 255, alpha), 2))
-        p.drawRoundedRect(x - 21, y - 15, 42, 34, 9, 9)
-        p.setPen(QPen(QColor(235, 240, 250, alpha), 3)); p.drawArc(x - 9, y - 18, 18, 22, 0, 180 * 16); p.drawRect(x - 8, y - 2, 16, 13)
-
-
+        if self.progress > 0.32:
+            rise = min(1.0, (self.progress - 0.32) / 0.68)
+            eased = 1 - (1 - rise) ** 3
+            card_w = min(760, w - 160)
+            card_h = 120
+            y = h / 2 + 220 - (260 * eased)
+            alpha = int(255 * min(1, rise * 1.5))
+            painter.setBrush(QBrush(QColor(17, 24, 36, alpha)))
+            painter.setPen(QPen(QColor(110, 135, 255, alpha), 2))
+            painter.drawRoundedRect(int(center.x() - card_w / 2), int(y - card_h / 2), card_w, card_h, 20, 20)
+            painter.setPen(QPen(QColor(235, 240, 250, alpha), 2))
+            painter.setFont(QFont("Segoe UI", 18, QFont.Weight.DemiBold))
+            painter.drawText(int(center.x() - card_w / 2), int(y - 12), card_w, 32,
+                             Qt.AlignmentFlag.AlignCenter, "QUESTION LOCKED")
+            painter.setPen(QPen(QColor(145, 158, 182, alpha), 1))
+            painter.setFont(QFont("Segoe UI", 11))
+            painter.drawText(int(center.x() - card_w / 2), int(y + 17), card_w, 24,
+                             Qt.AlignmentFlag.AlignCenter, "Answer correctly to continue")
 class AnswerButton(QPushButton):
     def __init__(self, text, parent=None):
         super().__init__(text, parent)
-        self.setMinimumHeight(58); self.setCursor(Qt.CursorShape.PointingHandCursor); self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setStyleSheet("""
-        QPushButton { background:rgba(21,29,43,242); border:1px solid rgba(128,146,181,75); border-radius:14px; padding:10px 18px; text-align:left; font-size:16px; }
-        QPushButton:hover { background:rgba(72,91,139,248); border:1px solid rgba(145,164,255,225); padding-left:22px; }
-        QPushButton:pressed { background:rgba(92,118,232,255); border:1px solid #a5b3ff; padding-left:27px; padding-top:12px; }
-        """)
+        self.setMinimumHeight(60)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setStyleSheet(self.idle())
 
-
+    def idle(self):
+        return ("QPushButton{background:rgba(18,27,40,238);border:1px solid rgba(119,140,177,78);"
+                "border-radius:14px;padding:10px 18px;text-align:left;font-size:16px;} "
+                "QPushButton:hover{background:rgba(58,76,119,248);border:1px solid rgba(127,151,255,235);padding-left:22px;} "
+                "QPushButton:pressed{background:rgba(92,124,255,255);border:1px solid rgba(180,195,255,255);padding-left:25px;}")
 class Overlay(QWidget):
     def __init__(self, question, answer_callback, target_callback, settings):
         super().__init__()
