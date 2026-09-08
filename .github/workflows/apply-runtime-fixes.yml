@@ -1,10 +1,7 @@
 name: Apply Runtime Fixes
 
+# Disabled for automatic development. Run manually only when deliberately applying the legacy runtime patcher.
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'tools/apply_runtime_fixes.py'
   workflow_dispatch:
 
 permissions:
@@ -12,6 +9,7 @@ permissions:
 
 jobs:
   fix:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
