@@ -20,27 +20,36 @@ class AuraLogo(base.AuraLogo):
         core=QPainterPath(); core.moveTo(cx,cy-19); core.cubicTo(cx+14,cy-16,cx+17,cy-5,cx+13,cy+9); core.cubicTo(cx+9,cy+20,cx+3,cy+23,cx,cy+24); core.cubicTo(cx-3,cy+23,cx-9,cy+20,cx-13,cy+9); core.cubicTo(cx-17,cy-5,cx-14,cy-16,cx,cy-19); p.setBrush(QColor(8,13,22,246)); p.setPen(QPen(self.accent,2.5,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap,Qt.PenJoinStyle.RoundJoin)); p.drawPath(core)
         inner=QColor(self.accent); inner.setAlpha(42); p.setBrush(inner); p.setPen(Qt.PenStyle.NoPen); p.drawEllipse(c,12,12); p.setBrush(QColor(245,247,255,242)); p.drawEllipse(QPointF(cx,cy-4),4.3,4.3); p.drawRoundedRect(int(cx-2.2),int(cy-1),4.4,11,2.2,2.2); p.setPen(QPen(self.accent,1.8,Qt.PenStyle.SolidLine,Qt.PenCapStyle.RoundCap))
         for dx,dy in ((0,-35),(35,0),(0,35),(-35,0)): p.drawLine(QPointF(cx+dx*.72,cy+dy*.72),QPointF(cx+dx*.86,cy+dy*.86))
+def _cell(value): return (lambda v:(lambda:v))(value).__closure__[0]
+def _rebind_tree(function,instance,seen=None):
+    if not isinstance(function,types.FunctionType): return function
+    seen=set() if seen is None else seen
+    if id(function) in seen: return function
+    seen.add(id(function)); closure=function.__closure__
+    if not closure: return function
+    cells=list(closure); changed=False
+    for i,c in enumerate(closure):
+        try: value=c.cell_contents
+        except ValueError: continue
+        if value is base.MainWindow if hasattr(base,"MainWindow") else False:
+            cells[i]=_cell(instance); changed=True
+        elif isinstance(value,type) and value.__name__=="MainWindow" and value.__module__=="main":
+            cells[i]=_cell(instance); changed=True
+        elif isinstance(value,types.FunctionType):
+            rebound=_rebind_tree(value,instance,seen)
+            if rebound is not value: cells[i]=_cell(rebound); changed=True
+    if not changed: return function
+    return types.FunctionType(function.__code__,function.__globals__,function.__name__,function.__defaults__,tuple(cells))
 def _replace_cell(fn,predicate,replacement):
     cells=list(fn.__closure__ or ())
     for i,cell in enumerate(cells):
         try: value=cell.cell_contents
         except ValueError: continue
-        if predicate(value): cells[i]=(lambda v:(lambda:v))(replacement).__closure__[0]; return types.FunctionType(fn.__code__,fn.__globals__,fn.__name__,fn.__defaults__,tuple(cells))
+        if predicate(value): cells[i]=_cell(replacement); return types.FunctionType(fn.__code__,fn.__globals__,fn.__name__,fn.__defaults__,tuple(cells))
     return fn
 def _normalize_build(fn):
-    # install_ui() creates nested functions with the installer-time MainWindow
-    # class captured as `self`. Resolve those closures only when the real window
-    # instance exists, so the stable UI implementation remains untouched.
     runtime=base.self
-    cells=list(fn.__closure__ or ())
-    changed=False
-    for i,cell in enumerate(cells):
-        try: value=cell.cell_contents
-        except ValueError: continue
-        if isinstance(value,type) and value is getattr(runtime,"__class__",None):
-            cells[i]=(lambda v:(lambda:v))(runtime).__closure__[0]; changed=True
-    if changed:
-        fn=types.FunctionType(fn.__code__,fn.__globals__,fn.__name__,fn.__defaults__,tuple(cells))
+    fn=_rebind_tree(fn,runtime)
     for cell in fn.__closure__ or ():
         try: value=cell.cell_contents
         except ValueError: continue
@@ -48,8 +57,7 @@ def _normalize_build(fn):
             def factory(helper):
                 def fixed(): return helper(base.self)
                 return fixed
-            fn=_replace_cell(fn,lambda current,target=value:current is target,factory(value))
-            break
+            fn=_replace_cell(fn,lambda current,target=value:current is target,factory(value)); break
     return fn
 def _settings_page(TimerSettings,save_settings,w):
     page=QWidget(); outer=QVBoxLayout(page); outer.setContentsMargins(38,26,38,36); outer.setSpacing(16); top=QHBoxLayout(); back=QPushButton("←  Back"); back.setObjectName("ghost"); back.clicked.connect(lambda:w.go_page(w.home_page,-1)); top.addWidget(back); top.addStretch(); outer.addLayout(top); title=QLabel("Settings"); title.setObjectName("pageHeading"); outer.addWidget(title); sub=QLabel("Everything that controls your StudyLock experience, in one place."); sub.setObjectName("pageSubtitle"); outer.addWidget(sub)
@@ -69,7 +77,7 @@ def install_ui(*args,**kwargs):
     global self,APP_NAME
     MainWindow,GamePicker,TimerSettings,PerformanceDialog=args[:4]; self=MainWindow; APP_NAME=getattr(base,"APP_NAME","StudyLock"); base.self=MainWindow; base.APP_NAME=APP_NAME; base.AuraLogo=AuraLogo; base.install_ui(*args,**kwargs); stable_build_source=MainWindow.build_ui; save_settings=args[-1]
     def build_ui_plus():
-        w=base.self; stable_build=_normalize_build(stable_build_source); stable_build.__globals__["self"]=w; stable_build(); w.settings_page=_settings_page(TimerSettings,save_settings,w); w.stack.addWidget(w.settings_page); root=w.home_page.widget()
+        w=base.self; base.self=w; stable_build=_normalize_build(stable_build_source); stable_build.__globals__["self"]=w; stable_build(); w.settings_page=_settings_page(TimerSettings,save_settings,w); w.stack.addWidget(w.settings_page); root=w.home_page.widget()
         for card in root.findChildren(base.RippleCard):
             for label in [x for x in card.findChildren(QLabel) if x.text().strip().lower().startswith("change")]:
                 button=QPushButton("CHANGE"); button.setObjectName("cardAction"); card.layout().replaceWidget(label,button); label.deleteLater(); button.clicked.connect(card.clicked.emit)
