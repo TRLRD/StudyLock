@@ -1,0 +1,119 @@
+name: Fix target-activated timer
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'main.py'
+      - '.github/workflows/fix-target-timer.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch target-activated timer
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('main.py')
+          s = p.read_text(encoding='utf-8')
+          old = '''    def start_run(self):
+        if not self.settings.get("game"): QMessageBox.warning(self, APP_NAME, "Select a game first."); return
+        cid, subject, stage, paper = self.selected_filter(); available = filter_questions(self.questions, curriculum_id=cid, subject=subject, qualification_stage=stage, paper_id=paper)
+        if not available: QMessageBox.warning(self, APP_NAME, "No questions match the current curriculum, subject, qualification, and paper selection."); return
+        self.running = True; self.next_at = time.monotonic() + self.interval.value(); self.start_button.setText("STOP STUDYLOCK"); self.status.setText("RUNNING"); self.status.setStyleSheet("background:#13241b;color:#6fe0a2;border:1px solid #214e37;border-radius:11px;padding:6px 11px;font-weight:700;"); self.hud = TimerHUD(self.settings); self.hud.show(); self.tick.start()
+'''
+          new = '''    def start_run(self):
+        if not self.settings.get("game"):
+            QMessageBox.warning(self, APP_NAME, "Select a game first.")
+            return
+        cid, subject, stage, paper = self.selected_filter()
+        available = filter_questions(self.questions, curriculum_id=cid, subject=subject, qualification_stage=stage, paper_id=paper)
+        if not available:
+            QMessageBox.warning(self, APP_NAME, "No questions match the current curriculum, subject, qualification, and paper selection.")
+            return
+        self.running = True
+        # The study interval does NOT begin when the user presses Start.
+        # It begins only when the selected target application becomes foreground.
+        self.next_at = 0
+        self.start_button.setText("STOP STUDYLOCK")
+        self.status.setText("WAITING FOR TARGET")
+        self.status.setStyleSheet("background:#191c24;color:#c7d0df;border:1px solid #30394a;border-radius:11px;padding:6px 11px;font-weight:700;")
+        self.hud = TimerHUD(self.settings)
+        self.hud.hide()
+        self.tick.start()
+'''
+          if old not in s:
+              raise SystemExit('start_run block not found')
+          s = s.replace(old, new, 1)
+
+          old = '''    def loop(self):
+        if not self.running: return
+        hwnd, pid = self.target();
+        if not hwnd or not pid: return
+        rect = window_rect(hwnd); screen = QApplication.screenAt(rect.center()) if rect else QApplication.primaryScreen(); screen = screen or QApplication.primaryScreen()
+        if hasattr(self, "hud"): self.hud.update_time(max(0, self.next_at - time.monotonic()), screen)
+        if time.monotonic() >= self.next_at:
+            self.next_at = time.monotonic() + self.interval.value()
+            if self.overlay is None or not self.overlay.isVisible(): self.trigger_with_animation()
+'''
+          new = '''    def loop(self):
+        if not self.running:
+            return
+
+        hwnd, pid = self.target()
+        now = time.monotonic()
+
+        # Do not count down while the selected game is not the active window.
+        # This also prevents the HUD from appearing at an arbitrary/default position.
+        if not hwnd or not pid:
+            self.next_at = 0
+            if hasattr(self, "hud") and self.hud.isVisible():
+                self.hud.hide()
+            if self.status.text() != "RUNNING":
+                self.status.setText("WAITING FOR TARGET")
+            return
+
+        rect = window_rect(hwnd)
+        screen = QApplication.screenAt(rect.center()) if rect else QApplication.primaryScreen()
+        screen = screen or QApplication.primaryScreen()
+
+        # First moment the selected target becomes active: start a fresh interval.
+        if self.next_at <= 0:
+            self.next_at = now + self.interval.value()
+            if hasattr(self, "hud"):
+                self.hud.update_time(self.interval.value(), screen)
+                self.hud.show()
+                self.hud.raise_()
+            self.status.setText("RUNNING")
+        elif hasattr(self, "hud"):
+            self.hud.update_time(max(0, self.next_at - now), screen)
+
+        if now >= self.next_at:
+            self.next_at = now + self.interval.value()
+            if self.overlay is None or not self.overlay.isVisible():
+                self.trigger_with_animation()
+'''
+          if old not in s:
+              raise SystemExit('loop block not found')
+          s = s.replace(old, new, 1)
+
+          p.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Syntax check
+        run: python -m py_compile main.py
+
+      - name: Commit patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add main.py
+          git diff --cached --quiet && exit 0
+          git commit -m 'Fix timer to start when target game is active'
+          git push
