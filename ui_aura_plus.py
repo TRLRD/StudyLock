@@ -48,13 +48,14 @@ def _settings_page(TimerSettings,save_settings,w):
     def save_timer(): w.settings["interval"]=interval.value(); save_settings(w.settings); w.refresh_status(); w.update_dashboard_labels()
     save.clicked.connect(save_timer); actions.addWidget(advanced); actions.addWidget(save); tl.addLayout(actions); outer.addWidget(timer)
     appearance=QWidget(); av=QVBoxLayout(appearance); av.setContentsMargins(0,0,0,0); e=QLabel("APPEARANCE"); e.setObjectName("eyebrow"); av.addWidget(e); h=QLabel("Choose the AURA color language for the entire app."); h.setObjectName("muted"); av.addWidget(h); grid=QGridLayout(); w.settings_theme_cards=[]
-    for i,(name,data) in enumerate(base.THEMES.items()): card=base.ThemeCard(name,data); card.clicked.connect(lambda name=name:w.select_theme(name)); w.settings_theme_cards.append(card); grid.addWidget(card,i//2,i%2)
+    for i,(name,data) in enumerate(base.THEMES.items()):
+        card=base.ThemeCard(name,data); card.clicked.connect(lambda name=name:w.select_theme(name)); w.settings_theme_cards.append(card); grid.addWidget(card,i//2,i%2)
     av.addLayout(grid); outer.addWidget(appearance); more=base.RippleCard(base.THEMES[w.settings.get("theme","Aura Purple")]["accent"]); more.setObjectName("panel"); ml=QVBoxLayout(more); e=QLabel("MORE SETTINGS"); e.setObjectName("eyebrow"); ml.addWidget(e); f=QLabel("Reserved for future StudyLock options — notifications, accessibility, behavior and more."); f.setObjectName("muted"); f.setWordWrap(True); ml.addWidget(f); outer.addWidget(more); outer.addStretch(); return page
 def install_ui(*args,**kwargs):
     global self,APP_NAME
     MainWindow,GamePicker,TimerSettings,PerformanceDialog=args[:4]; self=MainWindow; APP_NAME=getattr(base,"APP_NAME","StudyLock"); base.self=MainWindow; base.APP_NAME=APP_NAME; base.AuraLogo=AuraLogo; base.install_ui(*args,**kwargs); stable_build=_normalize_build(MainWindow.build_ui); save_settings=args[-1]
-    def build_ui_plus(w):
-        base.self=w; stable_build.__globals__["self"]=w; stable_build(); w.settings_page=_settings_page(TimerSettings,save_settings,w); w.stack.addWidget(w.settings_page); root=w.home_page.widget()
+    def build_ui_plus():
+        w=base.self; stable_build.__globals__["self"]=w; stable_build(); w.settings_page=_settings_page(TimerSettings,save_settings,w); w.stack.addWidget(w.settings_page); root=w.home_page.widget()
         for card in root.findChildren(base.RippleCard):
             for label in [x for x in card.findChildren(QLabel) if x.text().strip().lower().startswith("change")]: button=QPushButton("CHANGE"); button.setObjectName("cardAction"); card.layout().replaceWidget(label,button); label.deleteLater(); button.clicked.connect(card.clicked.emit)
         for card in root.findChildren(base.RippleCard):
@@ -64,9 +65,8 @@ def install_ui(*args,**kwargs):
                 except (TypeError,RuntimeError): pass
                 card.clicked.connect(lambda:w.go_page(w.settings_page,1))
         w.apply_theme()
-    def open_settings(w): w.go_page(w.settings_page,1)
+    def open_settings(): base.self.go_page(base.self.settings_page,1)
     MainWindow.build_ui=build_ui_plus; MainWindow.open_quick_settings=open_settings; original_apply=MainWindow.apply_theme
-    def apply_theme_plus(w):
-        original_apply(w)
-        for card in getattr(w,"settings_theme_cards",[]): card.set_selected(card.name==w.settings.get("theme"))
+    def apply_theme_plus():
+        w=base.self; original_apply(); [card.set_selected(card.name==w.settings.get("theme")) for card in getattr(w,"settings_theme_cards",[])]
     MainWindow.apply_theme=apply_theme_plus
