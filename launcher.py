@@ -15,6 +15,8 @@ from ui_overhaul import install_ui
 # isolated from the MainWindow instance, then bind those functions explicitly
 # after installation so Python supplies the correct instance at runtime.
 ui_overhaul.self = engine.MainWindow
+# UI-overhaul helpers reference the app name in their own module scope.
+ui_overhaul.APP_NAME = engine.APP_NAME
 
 install_ui(
     engine.MainWindow,
