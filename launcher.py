@@ -112,8 +112,11 @@ engine.MainWindow.build_ui = _bind_installer_method("build_ui")
 
 # These presentation methods are also installed from nested functions. Bind
 # them explicitly so callbacks and Qt signals always operate on the right window.
+# apply_theme is intentionally NOT wrapped here: install_ui assigns it directly
+# as a class method and its explicit self parameter must receive Python's normal
+# method binding. Wrapping it would remove that implicit self and cause the
+# "missing 1 required positional argument: self" error during build_ui().
 for _name in (
-    "apply_theme",
     "refresh_status",
     "refresh_game_label",
     "pick_game",
@@ -128,15 +131,3 @@ for _name in (
     "open_quick_settings",
 ):
     setattr(engine.MainWindow, _name, _bind_installer_method(_name))
-
-
-def _go_page(self, widget, direction=1):
-    """Navigate using the current MainWindow instance's animated stack."""
-    return self.stack.go(widget, direction)
-
-
-engine.MainWindow.go_page = _go_page
-
-
-if __name__ == "__main__":
-    engine.main()
