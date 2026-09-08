@@ -5,13 +5,15 @@ new presentation layer before creating MainWindow, so the engine and its tests
 remain intact while the packaged EXE gets the new UI.
 """
 
+import types
+
 import main as engine
 import ui_overhaul
 from ui_overhaul import install_ui
 
 # install_ui builds presentation methods as nested functions. Keep the installer
 # isolated from the MainWindow instance, then bind those functions explicitly
-# after installation so Python supplies the correct instance at runtime.
+after installation so Python supplies the correct instance at runtime.
 ui_overhaul.self = engine.MainWindow
 
 install_ui(
@@ -28,6 +30,59 @@ install_ui(
 )
 
 
+def _replace_closure_cell(function, predicate, replacement):
+    """Return a function with one matching closure cell replaced.
+
+    A few legacy installer helpers are local functions. If one was declared with
+    a ``self`` parameter but is called as a local helper, Python reports a
+    missing-self TypeError. Rebuilding the function with a corrected closure is
+    safer than mutating the original function object or changing the engine.
+    """
+    closure = function.__closure__
+    if not closure:
+        return function
+
+    cells = list(closure)
+    for index, cell in enumerate(cells):
+        try:
+            value = cell.cell_contents
+        except ValueError:
+            continue
+        if predicate(value):
+            cells[index] = (lambda value: (lambda: value))(replacement).__closure__[0]
+            return types.FunctionType(
+                function.__code__,
+                function.__globals__,
+                function.__name__,
+                function.__defaults__,
+                tuple(cells),
+            )
+    return function
+
+
+# Current ui_overhaul.py defines make_header(self) but build_ui calls the local
+# helper as make_header(). Normalize that helper to a zero-argument closure while
+# retaining the existing installer-scope ``self`` behavior.
+_original_build_ui = engine.MainWindow.build_ui
+for _cell in _original_build_ui.__closure__ or ():
+    try:
+        _value = _cell.cell_contents
+    except ValueError:
+        continue
+    if getattr(_value, "__name__", None) == "make_header":
+        def _make_header_without_argument(_helper):
+            def _make_header():
+                return _helper(ui_overhaul.self)
+            return _make_header
+        _fixed = _make_header_without_argument(_value)
+        _original_build_ui = _replace_closure_cell(
+            _original_build_ui,
+            lambda value, target=_value: value is target,
+            _fixed,
+        )
+        break
+
+
 def _bind_installer_method(method_name):
     """Turn an installer-scope function into a real MainWindow method.
 
@@ -37,6 +92,8 @@ def _bind_installer_method(method_name):
     the installer function never receives an unexpected implicit ``self``.
     """
     original = getattr(engine.MainWindow, method_name)
+    if method_name == "build_ui":
+        original = _original_build_ui
 
     def bound(self, *args, **kwargs):
         ui_overhaul.self = self
