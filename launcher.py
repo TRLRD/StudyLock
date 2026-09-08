@@ -54,17 +54,14 @@ _original_build_ui = engine.MainWindow.build_ui
 
 
 def _bind_installer_method(method_name):
-    """Bind an installed presentation function to the real MainWindow instance."""
+    """Bind an installed zero-argument presentation function to the window."""
     original = _original_build_ui if method_name == "build_ui" else getattr(engine.MainWindow, method_name)
 
     def bound(self, *args, **kwargs):
+        # ui_overhaul's installer functions intentionally use their module-level
+        # `self`. Set it to the real instance, then call the function unchanged.
         ui_overhaul.self = self
-        # build_ui_plus is installed as a zero-argument function because it
-        # resolves the runtime window through ui_aura_plus.self. Do not pass
-        # self into that function.
-        if method_name == "build_ui":
-            return original()
-        return original(self, *args, **kwargs)
+        return original(*args, **kwargs)
 
     bound.__name__ = getattr(original, "__name__", method_name)
     bound.__doc__ = getattr(original, "__doc__", None)
