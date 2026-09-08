@@ -28,21 +28,19 @@ def _replace_cell(fn,predicate,replacement):
         if predicate(value): cells[i]=(lambda v:(lambda:v))(replacement).__closure__[0]; return types.FunctionType(fn.__code__,fn.__globals__,fn.__name__,fn.__defaults__,tuple(cells))
     return fn
 def _normalize_build(fn):
-    # install_ui() creates nested functions with its installer-time `self`.
-    # Replace every closure cell that points at the MainWindow class with the
-    # actual runtime instance. This keeps the original UI implementation intact.
+    # install_ui() creates nested functions with the installer-time MainWindow
+    # class captured as `self`. Resolve those closures only when the real window
+    # instance exists, so the stable UI implementation remains untouched.
     runtime=base.self
     cells=list(fn.__closure__ or ())
     changed=False
     for i,cell in enumerate(cells):
         try: value=cell.cell_contents
         except ValueError: continue
-        if value is runtime or value is getattr(runtime,"__class__",None):
+        if isinstance(value,type) and value is getattr(runtime,"__class__",None):
             cells[i]=(lambda v:(lambda:v))(runtime).__closure__[0]; changed=True
     if changed:
         fn=types.FunctionType(fn.__code__,fn.__globals__,fn.__name__,fn.__defaults__,tuple(cells))
-    # The header helper is another nested function whose closure may still hold
-    # the installer-time class. Normalize it separately because build_ui calls it.
     for cell in fn.__closure__ or ():
         try: value=cell.cell_contents
         except ValueError: continue
@@ -69,9 +67,9 @@ def _settings_page(TimerSettings,save_settings,w):
     av.addLayout(grid); outer.addWidget(appearance); more=base.RippleCard(base.THEMES[w.settings.get("theme","Aura Purple")]["accent"]); more.setObjectName("panel"); ml=QVBoxLayout(more); e=QLabel("MORE SETTINGS"); e.setObjectName("eyebrow"); ml.addWidget(e); f=QLabel("Reserved for future StudyLock options — notifications, accessibility, behavior and more."); f.setObjectName("muted"); f.setWordWrap(True); ml.addWidget(f); outer.addWidget(more); outer.addStretch(); return page
 def install_ui(*args,**kwargs):
     global self,APP_NAME
-    MainWindow,GamePicker,TimerSettings,PerformanceDialog=args[:4]; self=MainWindow; APP_NAME=getattr(base,"APP_NAME","StudyLock"); base.self=MainWindow; base.APP_NAME=APP_NAME; base.AuraLogo=AuraLogo; base.install_ui(*args,**kwargs); stable_build=_normalize_build(MainWindow.build_ui); save_settings=args[-1]
+    MainWindow,GamePicker,TimerSettings,PerformanceDialog=args[:4]; self=MainWindow; APP_NAME=getattr(base,"APP_NAME","StudyLock"); base.self=MainWindow; base.APP_NAME=APP_NAME; base.AuraLogo=AuraLogo; base.install_ui(*args,**kwargs); stable_build_source=MainWindow.build_ui; save_settings=args[-1]
     def build_ui_plus():
-        w=base.self; stable_build.__globals__["self"]=w; stable_build(); w.settings_page=_settings_page(TimerSettings,save_settings,w); w.stack.addWidget(w.settings_page); root=w.home_page.widget()
+        w=base.self; stable_build=_normalize_build(stable_build_source); stable_build.__globals__["self"]=w; stable_build(); w.settings_page=_settings_page(TimerSettings,save_settings,w); w.stack.addWidget(w.settings_page); root=w.home_page.widget()
         for card in root.findChildren(base.RippleCard):
             for label in [x for x in card.findChildren(QLabel) if x.text().strip().lower().startswith("change")]:
                 button=QPushButton("CHANGE"); button.setObjectName("cardAction"); card.layout().replaceWidget(label,button); label.deleteLater(); button.clicked.connect(card.clicked.emit)
